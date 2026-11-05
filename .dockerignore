@@ -1,0 +1,10 @@
+node_modules
+.git
+.data*
+artifacts
+release
+coverage
+test-results
+website
+ios
+android

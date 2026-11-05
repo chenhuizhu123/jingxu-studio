@@ -1,0 +1,1503 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as paths;
+import 'package:path_provider/path_provider.dart';
+import 'models.dart';
+import 'domain.dart';
+import 'records.dart';
+import 'render.dart';
+import 'providers.dart';
+import 'director.dart';
+import 'mcp.dart';
+import 'package_service.dart';
+import 'package_files.dart';
+import 'package_media.dart';
+import 'speech.dart';
+import 'shot_generation.dart';
+
+abstract class Credentials {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+class SecureCredentials implements Credentials {
+  final FlutterSecureStorage storage;
+  SecureCredentials([this.storage = const FlutterSecureStorage()]);
+  @override
+  Future<String?> read(String key) => storage.read(key: key);
+  @override
+  Future<void> write(String key, String value) =>
+      storage.write(key: key, value: value);
+  @override
+  Future<void> delete(String key) => storage.delete(key: key);
+}
+
+/// Local application engine, deliberately keeping the HTTP-shaped UI facade
+/// separate from direct BYOK provider requests. No Jingxu server is required.
+class StudioApi {
+  final http.Client client;
+  final Credentials credentials;
+  final LocalRenderer renderer;
+  final RemoteTools remoteTools;
+  final PackageMediaCheck packageMediaCheck;
+  ProjectPackages? _packages;
+  final _archiveBusy = <String>{};
+  Records? records;
+  Directory? directory;
+  String language = 'en';
+  bool _closed = false, _pumping = false, _pumpAgain = false;
+  final _agentBusy = <String>{};
+  final _speechTokens = <String, SpeechCancellation>{};
+  final _imageTokens = <String, ProviderCancellation>{};
+  Completer<void>? _pumpDone;
+  Future<void>? _closeFuture;
+  Future<void> _mutations = Future.value();
+  void Function()? onChanged;
+  StudioApi({
+    http.Client? client,
+    Credentials? credentials,
+    this.records,
+    this.directory,
+    LocalRenderer? renderer,
+    RemoteTools? remoteTools,
+    PackageMediaCheck? packageMediaCheck,
+  }) : packageMediaCheck = packageMediaCheck ?? validatePackageMedia,
+       client = client ?? http.Client(),
+       credentials = credentials ?? SecureCredentials(),
+       renderer = renderer ?? NativeRenderer(),
+       remoteTools = remoteTools ?? HttpMcpTools();
+  DirectProviders get providers => DirectProviders(client);
+  Future<void> restore() async {
+    directory ??= Directory(
+      paths.join((await getApplicationDocumentsDirectory()).path, 'Jingxu'),
+    );
+    await directory!.create(recursive: true);
+    for (final folder in ['media', 'exports', 'skills', 'incoming']) {
+      await Directory(path(folder)).create(recursive: true);
+    }
+    records ??= await SqliteRecords.open(path('studio.sqlite'));
+    _packages = ProjectPackages(
+      root: directory!.absolute.path,
+      schema: await rootBundle.loadString('assets/project-package.schema.json'),
+      records: records!,
+      validateMedia: packageMediaCheck,
+      commit: (work) => exclusive(work),
+    );
+    await _packages!.recover();
+    final projects = await records!.all('project');
+    final media = Directory(path('media'));
+    await recoverSpeechFiles(media, projects);
+    await recoverGeneratedFiles(media, projects);
+    for (final job in await records!.all('job')) {
+      if (_reviewedGeneration(job)) {
+        if (job['state'] == 'running' &&
+            projects.any(
+              (p) =>
+                  p['id'] == job['projectId'] &&
+                  (p['assets'] as List).any((a) => a['id'] == job['id']),
+            )) {
+          _markGenerationSaved(job);
+          await records!.put('job', job);
+        } else if (job['state'] == 'running' && job['remoteId'] == null) {
+          final submitted = job['phase'] == 'submitting';
+          job['state'] = submitted ? 'failed' : 'queued';
+          if (submitted) job['error'] = 'unknownSubmission';
+          await records!.put('job', job);
+        }
+        if (['succeeded', 'failed', 'cancelled'].contains(job['state'])) {
+          await credentials.delete('job-${job['id']}').catchError((_) {});
+        }
+        continue;
+      }
+      if (job['state'] == 'running' &&
+          (job['type'] == 'export' || job['remoteId'] == null)) {
+        job['state'] = 'failed';
+        job['error'] = job['type'] == 'export'
+            ? 'exportInterrupted'
+            : job['type'] == 'speech'
+            ? 'speechUnknownSubmission'
+            : 'unknownSubmission';
+        if (job['type'] == 'speech') job['message'] = '';
+        await records!.put('job', job);
+        if (job['type'] == 'speech') {
+          await credentials.delete('job-${job['id']}');
+        }
+      }
+    }
+    unawaited(_pump());
+  }
+
+  String path(String relative) {
+    // Files imported or generated by this app always use relative sandbox paths.
+    if (paths.isAbsolute(relative)) {
+      if (paths.isWithin(directory!.path, relative)) return relative;
+      throw ArgumentError('invalidPath');
+    }
+    final result = paths.normalize(paths.join(directory!.path, relative));
+    if (!paths.isWithin(directory!.path, result)) {
+      throw ArgumentError('invalidPath');
+    }
+    return result;
+  }
+
+  Future<Json> rawProject(String id) async =>
+      (await records!.all('project')).firstWhere(
+        (p) => p['id'] == id,
+        orElse: () => throw StateError('projectMissing'),
+      );
+  Json decorate(Json project) {
+    final copy = copyJson(project);
+    for (final asset in copy['assets'] as List) {
+      asset['url'] = path(asset['file']);
+    }
+    for (final item in copy['exports'] as List) {
+      item['url'] = path(item['file']);
+      if (item['kind'] == 'video') {
+        final subtitle =
+            item['subtitlesFile'] ??
+            ('${item['file']}'.endsWith('.mp4')
+                ? '${item['file']}'.replaceFirst(RegExp(r'\.mp4$'), '.srt')
+                : null);
+        if (subtitle != null && File(path(subtitle)).existsSync()) {
+          item['subtitlesUrl'] = path(subtitle);
+        }
+      }
+    }
+    return copy;
+  }
+
+  Future<T> exclusive<T>(Future<T> Function() work) {
+    if (_closed) return Future.error(StateError('packageCancelled'));
+    final result = Completer<T>();
+    _mutations = _mutations.then((_) async {
+      try {
+        result.complete(await work());
+      } catch (e, s) {
+        result.completeError(e, s);
+      }
+    });
+    return result.future;
+  }
+
+  Future<Json> mutate(String id, void Function(Json) action, {int? revision}) =>
+      exclusive(() async {
+        final project = await rawProject(id);
+        if (revision != null && revision != project['revision']) {
+          throw StateError('staleRevision');
+        }
+        action(project);
+        project['revision'] = (project['revision'] as int) + 1;
+        project['updatedAt'] = timestamp();
+        await records!.put('project', project);
+        onChanged?.call();
+        return decorate(project);
+      });
+  Future<List<Project>> projects() async =>
+      (await records!.all(
+        'project',
+      )).map((p) => Project.fromJson(decorate(p))).toList()..sort(
+        (a, b) => '${b.data['updatedAt']}'.compareTo('${a.data['updatedAt']}'),
+      );
+  Future<List<ProductionJob>> jobs() async => (await records!.all(
+    'job',
+  )).map(ProductionJob.fromJson).toList().reversed.toList();
+  Future<Project> project(String id) async =>
+      Project.fromJson(decorate(await rawProject(id)));
+  Future<Json> settings({bool secrets = false}) async {
+    final stored = await credentials.read('modelSettings');
+    final result = stored == null
+        ? <String, dynamic>{
+            'id': 'settings',
+            'generation': <String, dynamic>{
+              'provider': 'demo',
+              'endpoint': 'https://ark.cn-beijing.volces.com/api/v3',
+              'model': '',
+              'apiKey': '',
+            },
+            'agent': <String, dynamic>{
+              'endpoint': '',
+              'model': '',
+              'apiKey': '',
+            },
+            'mcp': <Json>[],
+            'concurrency': 1,
+          }
+        : Map<String, dynamic>.from(jsonDecode(stored));
+    result['speech'] = {...defaultSpeech, ...?result['speech'] as Json?};
+    result['image'] = {...defaultImage, ...?result['image'] as Json?};
+    if (!secrets) {
+      for (final key in ['generation', 'agent', 'speech', 'image']) {
+        result[key]['hasApiKey'] = '${result[key]['apiKey'] ?? ''}'.isNotEmpty;
+        result[key].remove('apiKey');
+      }
+    }
+    if (!secrets) {
+      for (final server in result['mcp'] as List? ?? []) {
+        server['hasToken'] = '${server['token'] ?? ''}'.isNotEmpty;
+        server.remove('token');
+      }
+    }
+    return result;
+  }
+
+  Future<dynamic> request(
+    String route, {
+    String method = 'GET',
+    Json? body,
+  }) async {
+    final data = body ?? <String, dynamic>{};
+    final parts = route.split('/').where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) throw StateError('invalidResponse');
+    if (parts[0] == 'settings') {
+      if (method == 'PUT') {
+        final current = await settings(secrets: true);
+        for (final key in ['generation', 'agent', 'speech', 'image']) {
+          final next = Map<String, dynamic>.from(data[key] ?? current[key]);
+          next['apiKey'] = next['apiKey'] ?? current[key]['apiKey'];
+          if ('${next['endpoint']}'.isNotEmpty) endpoint(next['endpoint']);
+          if (key == 'speech') validateSpeech(next, requireKey: false);
+          if (key == 'image') validateImageConfig(next, requireKey: false);
+          data[key] = next;
+        }
+        final servers = data['mcp'] as List? ?? [];
+        if (servers.length > 20 ||
+            servers.map((m) => m['id']).toSet().length != servers.length) {
+          throw ArgumentError('invalidResponse');
+        }
+        for (final server in servers) {
+          endpoint(server['url']);
+          if ('${server['id']}'.isEmpty) throw ArgumentError('invalidResponse');
+          server['token'] ??=
+              (current['mcp'] as List)
+                  .where((m) => m['id'] == server['id'])
+                  .firstOrNull?['token'] ??
+              '';
+        }
+        await credentials.write('modelSettings', jsonEncode(data));
+      }
+      return settings();
+    }
+    if (parts[0] == 'mcp') return remoteTools.list(await _server(parts[1]));
+    if (parts[0] == 'approvals') {
+      if (parts.length == 1) return records!.all('approval');
+      return decide(parts[1], data['approve'] == true);
+    }
+    if (parts[0] == 'jobs') {
+      if (parts.length == 1) {
+        return (await records!.all('job')).reversed.toList();
+      }
+      Future<Json> loadJob() async =>
+          (await records!.all('job')).firstWhere((j) => j['id'] == parts[1]);
+      if (parts.last == 'cancel' && method == 'POST') {
+        final job = await exclusive(() async {
+          final job = await loadJob();
+          if (!['queued', 'running'].contains(job['state'])) {
+            throw StateError('taskFinished');
+          }
+          job['state'] = 'cancelled';
+          job['message'] = 'remoteMayContinue';
+          await records!.put('job', job);
+          _speechTokens[job['id']]?.cancel();
+          _imageTokens[job['id']]?.cancel();
+          return job;
+        });
+        if (job['type'] == 'speech' || _reviewedGeneration(job)) {
+          await credentials.delete('job-${job['id']}');
+        }
+        if (job['type'] == 'export') {
+          await renderer.cancel(job['id']);
+          await renderer.cancel('${job['id']}-image');
+        }
+        onChanged?.call();
+        return job;
+      }
+      final job = await loadJob();
+      if (parts.last == 'retry') {
+        if (!['failed', 'cancelled'].contains(job['state'])) {
+          throw StateError('taskFinished');
+        }
+        if (_reviewedGeneration(job)) throw StateError('generationReviewAgain');
+        return enqueue(job['projectId'], job['type'], shotId: job['shotId']);
+      }
+      onChanged?.call();
+      return job;
+    }
+    if (parts[0] == 'skills') {
+      if (method == 'POST') {
+        if (!RegExp(r'^[a-z][a-z0-9-]{0,63}$').hasMatch('${data['name']}')) {
+          throw ArgumentError('invalidSkill');
+        }
+        await records!.put('skill', {'id': data['name'], ...data});
+      }
+      return [...builtInSkills, ...await records!.all('skill')];
+    }
+    if (parts[0] == 'projects') {
+      if (parts.length == 1) {
+        if (method == 'POST') {
+          final p = newProject(data, language: language);
+          await records!.put('project', p);
+          onChanged?.call();
+          return decorate(p);
+        }
+        return (await records!.all('project')).map(decorate).toList();
+      }
+      final id = parts[1];
+      if (parts.length == 2) {
+        if (method == 'DELETE') {
+          if ((await jobs()).any((j) => j.projectId == id && j.active)) {
+            throw StateError('cancelTasksFirst');
+          }
+          await records!.remove('project', id);
+          onChanged?.call();
+          return null;
+        }
+        if (method == 'PATCH') {
+          return mutate(id, (p) {
+            for (final key in [
+              'name',
+              'description',
+              'script',
+              'style',
+              'format',
+              'musicAssetId',
+              'musicVolume',
+              'burnSubtitles',
+            ]) {
+              if (data.containsKey(key)) p[key] = data[key];
+            }
+          }, revision: data['revision']);
+        }
+        return decorate(await rawProject(id));
+      }
+      switch (parts[2]) {
+        case 'storyboard':
+          return mutate(id, (p) => buildStoryboard(p, language: language));
+        case 'reorder':
+          return mutate(
+            id,
+            (p) => reorder(p, List<String>.from(data['shotIds'])),
+            revision: data['revision'],
+          );
+        case 'duplicate':
+          final p = copyJson(await rawProject(id));
+          p['id'] = newId();
+          p['name'] = '${p['name']} (${language == 'zh' ? '副本' : 'copy'})';
+          p['exports'] = <Json>[];
+          p['revision'] = 1;
+          p['updatedAt'] = timestamp();
+          await records!.put('project', p);
+          return decorate(p);
+        case 'shots':
+          if (parts.length == 3) {
+            return mutate(id, (p) {
+              if ((p['shots'] as List).length >= 60) {
+                throw StateError('shotLimit');
+              }
+              (p['shots'] as List).add(
+                emptyShot((p['shots'] as List).length + 1, language: language),
+              );
+            });
+          }
+          final shotId = parts[3];
+          if (parts.length == 5 && parts[4] == 'import') {
+            return mutate(id, (p) {
+              final asset = (p['assets'] as List).cast<Json>().firstWhere(
+                (a) =>
+                    a['id'] == data['assetId'] &&
+                    ['image', 'video'].contains(a['kind']),
+              );
+              addCandidate(p, shotId, asset, '', 'imported');
+            });
+          }
+          if (parts.length == 5 && parts[4] == 'speech') {
+            if (data['text'] is! String) {
+              throw ArgumentError('speechTextInvalid');
+            }
+            return enqueue(
+              id,
+              'speech',
+              shotId: shotId,
+              expectedText: data['text'],
+            );
+          }
+          if (parts.length == 5 &&
+              ['image', 'first-frame'].contains(parts[4])) {
+            if (method != 'POST') throw ArgumentError('invalidResponse');
+            return enqueue(id, parts[4], shotId: shotId, review: data);
+          }
+          if (parts.length == 5 && parts[4] == 'visual-review') {
+            return visualReview(id, shotId);
+          }
+          if (method == 'DELETE') {
+            if ((await jobs()).any((j) => j.shotId == shotId && j.active)) {
+              throw StateError('cancelTasksFirst');
+            }
+            return mutate(id, (p) {
+              (p['shots'] as List).removeWhere((s) => s['id'] == shotId);
+              for (final (index, shot) in (p['shots'] as List).indexed) {
+                shot['order'] = index + 1;
+              }
+            });
+          }
+          final patch = Map<String, dynamic>.from(data)..remove('revision');
+          return mutate(
+            id,
+            (p) => patchShot(p, shotId, patch),
+            revision: data['revision'],
+          );
+        case 'characters':
+          return mutate(id, (p) {
+            if (data['referenceId'] != null &&
+                !(p['assets'] as List).any(
+                  (a) => a['id'] == data['referenceId'] && a['kind'] == 'image',
+                )) {
+              throw ArgumentError('invalidReference');
+            }
+            if (parts.length == 3) {
+              (p['characters'] as List).add({'id': newId(), ...data});
+            } else {
+              final character = (p['characters'] as List).firstWhere(
+                (c) => c['id'] == parts[3],
+              );
+              character.addAll(data);
+            }
+          });
+        case 'generate':
+          final result = <Json>[];
+          for (final shotId in (data['shotIds'] as List).toSet()) {
+            result.add(await enqueue(id, 'generate', shotId: shotId));
+          }
+          return result;
+        case 'render':
+          return enqueue(id, 'export');
+        case 'subtitles':
+          return subtitles(await project(id));
+        case 'storyboard.csv':
+          return storyboardCsv(await project(id));
+        case 'archive':
+          return archive(id);
+        case 'check':
+          return findings(await project(id));
+        case 'chat':
+          return chat(id, '${data['text']}', data['skill']);
+      }
+    }
+    throw StateError('unsupportedAction');
+  }
+
+  Future<void> upload(String projectId, String name, Uint8List bytes) async {
+    if (bytes.length > 200 * 1024 * 1024 || bytes.isEmpty) {
+      throw ArgumentError('responseTooLarge');
+    }
+    final ext = paths.extension(name).toLowerCase();
+    final kind = ['.png', '.jpg', '.jpeg', '.webp'].contains(ext)
+        ? 'image'
+        : ext == '.mp4'
+        ? 'video'
+        : ['.mp3', '.wav', '.m4a'].contains(ext)
+        ? 'audio'
+        : ['.txt', '.srt'].contains(ext)
+        ? 'document'
+        : null;
+    if (kind == null) throw ArgumentError('unsupportedFile');
+    if (kind == 'video' &&
+        (bytes.length < 12 ||
+            ascii.decode(bytes.sublist(4, 8), allowInvalid: true) != 'ftyp')) {
+      throw ArgumentError('invalidVideo');
+    }
+    if (kind == 'image' &&
+        !((bytes.length >= 8 &&
+                bytes[0] == 137 &&
+                bytes[1] == 80 &&
+                bytes[2] == 78) ||
+            (bytes.length >= 3 && bytes[0] == 255 && bytes[1] == 216) ||
+            (bytes.length >= 12 &&
+                ascii.decode(bytes.sublist(8, 12), allowInvalid: true) ==
+                    'WEBP'))) {
+      throw ArgumentError('unsupportedFile');
+    }
+    final asset = {
+      'id': newId(),
+      'name': paths.basename(name),
+      'kind': kind,
+      'size': bytes.length,
+      'createdAt': timestamp(),
+    };
+    asset['file'] = 'media/${asset['id']}$ext';
+    await File(path(asset['file'] as String)).writeAsBytes(bytes, flush: true);
+    await mutate(projectId, (p) => (p['assets'] as List).add(asset));
+  }
+
+  Future<Json> enqueue(
+    String id,
+    String type, {
+    String? shotId,
+    String? expectedText,
+    Json? review,
+  }) => exclusive(() async {
+    if ((await jobs()).any(
+      (j) =>
+          j.projectId == id &&
+          j.shotId == shotId &&
+          j.active &&
+          (j.type == type ||
+              (['generate', 'first-frame'].contains(j.type) &&
+                  ['generate', 'first-frame'].contains(type))),
+    )) {
+      throw StateError('taskExists');
+    }
+    final p = await rawProject(id);
+    final shot = shotId == null
+        ? null
+        : (p['shots'] as List).cast<Json>().firstWhere(
+            (s) => s['id'] == shotId,
+          );
+    final config =
+        (await settings(secrets: true))[switch (type) {
+              'speech' => 'speech',
+              'image' => 'image',
+              _ => 'generation',
+            }]
+            as Json;
+    final reviewed = type == 'image' || type == 'first-frame';
+    String? reviewedPrompt;
+    List<String>? reviewedRefs;
+    int? reviewedDuration;
+    if (reviewed) {
+      if (review == null ||
+          shot == null ||
+          review['revision'] != p['revision'] ||
+          review['endpoint'] != config['endpoint'] ||
+          review['model'] != config['model']) {
+        throw StateError('generationChanged');
+      }
+      final project = Project.fromJson(p), current = Shot.fromJson(shot);
+      reviewedPrompt = generationPrompt(project, current);
+      if (type == 'image') {
+        validateImageConfig(config);
+        if (current.prompt.trim().isEmpty) {
+          throw StateError('imagePromptRequired');
+        }
+        reviewedRefs = shotReferenceIds(project, current);
+      } else {
+        if (config['provider'] != 'ark' ||
+            '${config['apiKey']}'.trim().isEmpty ||
+            '${config['model']}'.trim().isEmpty ||
+            '${config['endpoint']}'.trim().isEmpty) {
+          throw StateError('configureFirstFrame');
+        }
+        final assetId = current.selected?.assetId;
+        if (assetId == null || assetId != review['assetId']) {
+          throw StateError('generationChanged');
+        }
+        reviewedRefs = [assetId];
+        reviewedDuration = firstFrameSeconds(current);
+      }
+      generationReferences(project, reviewedRefs);
+    }
+    if (type == 'speech') {
+      validateSpeech(config);
+      final text = '${shot?['dialogue'] ?? ''}'.trim();
+      if (text.isEmpty || text.length > 3000) {
+        throw ArgumentError('speechTextInvalid');
+      }
+      if (expectedText != null && text != expectedText.trim()) {
+        throw StateError('speechTextChanged');
+      }
+    }
+    if (type == 'generate' &&
+        config['provider'] != 'demo' &&
+        ('${config['apiKey']}'.isEmpty || '${config['model']}'.isEmpty)) {
+      throw StateError('configureModel');
+    }
+    final job = <String, dynamic>{
+      'id': newId(),
+      'projectId': id,
+      'shotId': shotId,
+      'type': type,
+      'state': 'queued',
+      'progress': 0.0,
+      'createdAt': timestamp(),
+      'provider': switch (type) {
+        'speech' => 'speech-compatible',
+        'image' => 'seedream',
+        _ => config['provider'],
+      },
+      if (type == 'speech') 'speechText': '${shot!['dialogue']}'.trim(),
+      if (type == 'speech')
+        'speechConfig': {
+          'model': config['model'],
+          'voice': config['voice'],
+          'speed': config['speed'],
+        },
+      'snapshot': copyJson(p),
+      'prompt':
+          reviewedPrompt ??
+          (shot == null ? '' : '${shot['prompt']}\n${shot['note']}'),
+      'duration': reviewedDuration ?? shot?['duration'],
+      'referenceIds': reviewedRefs ?? shot?['referenceIds'],
+    };
+    await credentials.write('job-${job['id']}', jsonEncode(config));
+    try {
+      await records!.put('job', job);
+    } catch (_) {
+      // Keep the immutable provider settings if the database write reached disk.
+      if (!(await records!.all('job')).any((j) => j['id'] == job['id'])) {
+        await credentials.delete('job-${job['id']}');
+      }
+      rethrow;
+    }
+    onChanged?.call();
+    unawaited(_pump());
+    return job;
+  });
+  Future<bool> cancelled(String id) async =>
+      _closed ||
+      (await records!.all('job')).firstWhere((j) => j['id'] == id)['state'] ==
+          'cancelled';
+  Future<void> updateJob(Json job) async {
+    if (_closed) return;
+    await exclusive(() async {
+      if (!await cancelled(job['id'])) await records!.put('job', job);
+    });
+    onChanged?.call();
+  }
+
+  Future<void> _pump() async {
+    if (_closed || records == null) return;
+    if (_pumping) {
+      _pumpAgain = true;
+      return;
+    }
+    _pumpAgain = false;
+    _pumping = true;
+    final done = Completer<void>();
+    _pumpDone = done;
+    try {
+      while (!_closed) {
+        final waiting = (await records!.all(
+          'job',
+        )).where((j) => ['queued', 'running'].contains(j['state'])).toList();
+        if (waiting.isEmpty || _closed) break;
+        final job = waiting.first;
+        job['state'] = 'running';
+        await updateJob(job);
+        try {
+          if (await cancelled(job['id'])) continue;
+          if (_reviewedGeneration(job)) {
+            await _runShotGeneration(job);
+            continue;
+          } else if (job['type'] == 'speech') {
+            await _runSpeech(job);
+          } else if (job['type'] == 'export') {
+            final file = 'exports/${job['id']}.mp4';
+            await renderer.render(
+              Project.fromJson(decorate(job['snapshot'])),
+              path(file),
+              job['id'],
+              (file) => path(file),
+              (progress) {
+                job['progress'] = progress.clamp(0, 1);
+                onChanged?.call();
+              },
+            );
+            if (await cancelled(job['id'])) continue;
+            await File(
+              path('exports/${job['id']}.srt'),
+            ).writeAsString(subtitles(Project.fromJson(job['snapshot'])));
+            if (await cancelled(job['id'])) continue;
+            final outputSize = await File(path(file)).length();
+            await mutate(
+              job['projectId'],
+              (p) => (p['exports'] as List).add({
+                'id': job['id'],
+                'name': '${p['name']}-r${job['snapshot']['revision']}.mp4',
+                'kind': 'video',
+                'file': file,
+                'subtitlesFile': 'exports/${job['id']}.srt',
+                'size': outputSize,
+                'createdAt': timestamp(),
+                'revision': job['snapshot']['revision'],
+              }),
+            );
+          } else {
+            final config = Map<String, dynamic>.from(
+              jsonDecode((await credentials.read('job-${job['id']}'))!),
+            );
+            final snapshot = job['snapshot'] as Json;
+            Json asset;
+            if (config['provider'] == 'demo') {
+              final data = await rootBundle.load('assets/demo-1.png');
+              final file = 'media/${newId()}.png';
+              await File(path(file)).writeAsBytes(data.buffer.asUint8List());
+              asset = {
+                'id': newId(),
+                'file': file,
+                'kind': 'image',
+                'name': language == 'zh' ? '演示素材.png' : 'Demo illustration.png',
+                'size': data.lengthInBytes,
+                'createdAt': timestamp(),
+              };
+            } else {
+              if (job['remoteId'] == null) {
+                job['phase'] = 'submitting';
+                await updateJob(job);
+                final shot = (snapshot['shots'] as List).firstWhere(
+                  (s) => s['id'] == job['shotId'],
+                );
+                final references = <Json>[];
+                final refIds = <String>{
+                  ...List<String>.from(shot['referenceIds']),
+                  ...((snapshot['characters'] as List)
+                      .where(
+                        (c) => (shot['characterIds'] as List).contains(c['id']),
+                      )
+                      .map((c) => c['referenceId'])
+                      .whereType<String>()),
+                };
+                for (final id in refIds.take(4)) {
+                  final asset = (snapshot['assets'] as List).firstWhere(
+                    (a) => a['id'] == id,
+                  );
+                  final file = File(path(asset['file']));
+                  if (await file.length() > 10 * 1024 * 1024) {
+                    throw StateError('responseTooLarge');
+                  }
+                  references.add({
+                    'url':
+                        'data:image/${paths.extension(file.path).substring(1).replaceFirst('jpg', 'jpeg')};base64,${base64Encode(await file.readAsBytes())}',
+                  });
+                }
+                job['remoteId'] = await providers.submit(config, {
+                  'prompt': job['prompt'],
+                  'duration': job['duration'],
+                  'format': snapshot['format'],
+                  'references': references,
+                });
+                job['phase'] = 'polling';
+                await updateJob(job);
+              }
+              final url = await _remoteVideoUrl(config, job);
+              final file = 'media/${newId()}.mp4';
+              await providers.download(url, File(path(file)), () => _closed);
+              asset = {
+                'id': newId(),
+                'file': file,
+                'kind': 'video',
+                'name': '${job['shotId']}.mp4',
+                'size': await File(path(file)).length(),
+                'createdAt': timestamp(),
+              };
+            }
+            if (await cancelled(job['id'])) continue;
+            await mutate(
+              job['projectId'],
+              (p) => addCandidate(
+                p,
+                job['shotId'],
+                asset,
+                job['prompt'],
+                config['provider'] == 'demo' ? 'demo' : 'generated',
+              ),
+            );
+          }
+          job['state'] = 'succeeded';
+          job['progress'] = 1.0;
+          await updateJob(job);
+          await credentials.delete('job-${job['id']}');
+        } catch (error) {
+          job['state'] = 'failed';
+          if (job['type'] == 'speech') job['message'] = '';
+          if (_reviewedGeneration(job)) {
+            job['message'] = '';
+            job['error'] = _generationError(job, error);
+            // A failed acknowledgement can arrive after the project write.
+            try {
+              final current = await rawProject(job['projectId']);
+              if ((current['assets'] as List).any(
+                (a) => a['id'] == job['id'],
+              )) {
+                _markGenerationSaved(job);
+              }
+            } catch (_) {}
+            await updateJob(job);
+            if (!_closed) {
+              await credentials.delete('job-${job['id']}').catchError((_) {});
+            }
+            continue;
+          }
+          final speechError = _speechError(error);
+          job['error'] = job['type'] == 'speech'
+              ? speechError != 'speechFailed'
+                    ? speechError
+                    : job['phase'] == 'submitting'
+                    ? 'speechUnknownSubmission'
+                    : 'speechFailed'
+              : job['phase'] == 'submitting' && job['remoteId'] == null
+              ? 'unknownSubmission'
+              : 'taskFailed';
+          await updateJob(job);
+        }
+      }
+    } finally {
+      _pumping = false;
+      done.complete();
+      onChanged?.call();
+      if (_pumpAgain && !_closed) unawaited(_pump());
+    }
+  }
+
+  bool _reviewedGeneration(Json job) =>
+      ['image', 'first-frame'].contains(job['type']);
+
+  void _markGenerationSaved(Json job) {
+    job['state'] = 'succeeded';
+    job['progress'] = 1.0;
+    job['message'] = 'generationCandidateSaved';
+    job.remove('error');
+  }
+
+  Future<String> _remoteVideoUrl(
+    Json config,
+    Json job, {
+    ProviderCancellation? cancellation,
+  }) async {
+    final until = DateTime.now().add(const Duration(minutes: 30));
+    while (DateTime.now().isBefore(until)) {
+      if (await cancelled(job['id'])) throw StateError('providerCancelled');
+      final result = await providers.poll(
+        config,
+        job['remoteId'],
+        cancellation: cancellation,
+      );
+      final state = result['status'] ?? result['state'];
+      if (['failed', 'cancelled', 'canceled', 'expired'].contains(state)) {
+        throw StateError('providerTaskFailed');
+      }
+      if (['succeeded', 'completed', 'success'].contains(state)) {
+        final url =
+            result['content']?['video_url'] ??
+            result['video_url'] ??
+            result['url'];
+        if (url is! String || url.isEmpty) throw StateError('invalidVideo');
+        return url;
+      }
+      final pause = Future<void>.delayed(const Duration(seconds: 5));
+      await (cancellation?.guard(pause) ?? pause);
+    }
+    throw StateError('providerTimeout');
+  }
+
+  String _generationError(Json job, Object error) {
+    final key = error is StateError ? error.message : '';
+    if (RegExp(r'^imageHttp_\d{3}$').hasMatch(key) ||
+        [
+          'imageReferenceInvalid',
+          'imageReferencesTooLarge',
+          'imageReferenceLimit',
+          'generationChanged',
+          'imageInvalid',
+          'imageResponseTooLarge',
+          'invalidVideo',
+          'providerTaskFailed',
+          'providerTimeout',
+          'downloadFailed',
+        ].contains(key)) {
+      return key;
+    }
+    if (error is HttpException) {
+      final status = RegExp(
+        r'^Provider HTTP (\d{3})$',
+      ).firstMatch(error.message)?.group(1);
+      if (status != null) return 'imageHttp_$status';
+    }
+    return job['phase'] == 'submitting' && job['remoteId'] == null
+        ? 'unknownSubmission'
+        : 'taskFailed';
+  }
+
+  Future<void> _runShotGeneration(Json job) async {
+    final jobId = job['id'] as String, projectId = job['projectId'] as String;
+    final image = job['type'] == 'image';
+    final token = ProviderCancellation();
+    _imageTokens[jobId] = token;
+    final partial = File(path('media/first-frame-$jobId.partial.mp4'));
+    Json? asset;
+    try {
+      final config =
+          jsonDecode((await credentials.read('job-$jobId'))!) as Json;
+      final snapshot = Project.fromJson(job['snapshot']);
+      final shot = snapshot.shots.firstWhere((s) => s.id == job['shotId']);
+      Future<void> beforeSubmit() async {
+        job['phase'] = 'submitting';
+        job['message'] = 'generationSubmitting';
+        await updateJob(job);
+        if (await cancelled(jobId)) throw StateError('providerCancelled');
+      }
+
+      if (await cancelled(jobId)) return;
+      if (image || job['remoteId'] == null) {
+        final assets = generationReferences(
+          snapshot,
+          List<String>.from(job['referenceIds']),
+        );
+        final refs = await referenceData(
+          assets,
+          path,
+          token,
+          firstFrame: !image,
+        );
+        if (image) {
+          asset = await generateShotImage(
+            client: client,
+            config: config,
+            prompt: job['prompt'],
+            format: snapshot.format,
+            images: refs,
+            media: Directory(path('media')),
+            jobId: jobId,
+            token: token,
+            beforeSubmit: beforeSubmit,
+          );
+        } else {
+          await beforeSubmit();
+          job['remoteId'] = await providers.submit(config, {
+            'prompt': job['prompt'],
+            'duration': job['duration'],
+            'format': snapshot.format,
+            'firstFrame': true,
+            'references': [
+              {'url': refs.single},
+            ],
+          }, cancellation: token);
+          job['phase'] = 'polling';
+          job['message'] = 'generationPolling';
+          await updateJob(job);
+        }
+      }
+      if (!image) {
+        final url = await _remoteVideoUrl(config, job, cancellation: token);
+        await providers.download(
+          url,
+          partial,
+          () => _closed,
+          cancellation: token,
+        );
+        try {
+          await packageMediaCheck(partial.path, 'video');
+        } catch (_) {
+          throw StateError('invalidVideo');
+        }
+        token.check();
+        final file = 'media/first-frame-$jobId.mp4';
+        final size = await partial.length();
+        await partial.rename(path(file));
+        asset = {
+          'id': jobId,
+          'kind': 'video',
+          'file': file,
+          'mime': 'video/mp4',
+          'name': 'Seedance-${jobId.substring(0, 8)}.mp4',
+          'size': size,
+          'createdAt': timestamp(),
+        };
+      }
+      final candidate = asset!;
+      await exclusive(() async {
+        if (await cancelled(jobId)) throw StateError('providerCancelled');
+        final project = await rawProject(projectId);
+        addCandidate(
+          project,
+          shot.id,
+          candidate,
+          shot.prompt,
+          'generated',
+          provider: image ? 'seedream' : 'ark',
+        );
+        project['revision']++;
+        project['updatedAt'] = timestamp();
+        await records!.put('project', project);
+        _markGenerationSaved(job);
+        await records!.put('job', job);
+      });
+      await credentials.delete('job-$jobId').catchError((_) {});
+      onChanged?.call();
+    } catch (_) {
+      if (asset != null) {
+        var referenced = true;
+        try {
+          referenced = ((await rawProject(projectId))['assets'] as List).any(
+            (a) => a['id'] == jobId,
+          );
+        } catch (error) {
+          if (error is StateError && error.message == 'projectMissing') {
+            referenced = false;
+          }
+        }
+        if (!referenced) {
+          try {
+            await File(path(asset['file'])).delete();
+          } catch (_) {}
+        }
+      }
+      rethrow;
+    } finally {
+      _imageTokens.remove(jobId);
+      try {
+        if (await partial.exists()) await partial.delete();
+      } catch (_) {}
+    }
+  }
+
+  String _speechError(Object error) {
+    final key = error.toString().replaceFirst(
+      RegExp(r'^(Bad state|Invalid argument\(s\)):\s*'),
+      '',
+    );
+    if (RegExp(r'^speechHttp_\d{3}$').hasMatch(key) ||
+        [
+          'speechTextInvalid',
+          'speechTextChanged',
+          'speechSpeedInvalid',
+          'speechTooLarge',
+          'speechInvalidAudio',
+          'speechTimeout',
+          'speechCancelled',
+          'configureSpeech',
+          'httpsRequired',
+        ].contains(key)) {
+      return key;
+    }
+    return 'speechFailed';
+  }
+
+  Future<void> _runSpeech(Json job) async {
+    final token = SpeechCancellation();
+    _speechTokens[job['id']] = token;
+    Json? asset;
+    try {
+      if (await cancelled(job['id'])) return;
+      final config =
+          jsonDecode((await credentials.read('job-${job['id']}'))!) as Json;
+      job['phase'] = 'submitting';
+      job['message'] = 'speechGenerating';
+      await updateJob(job);
+      if (await cancelled(job['id'])) return;
+      asset = await generateSpeech(
+        client: client,
+        config: config,
+        text: job['speechText'],
+        order: (job['snapshot']['shots'] as List).firstWhere(
+          (s) => s['id'] == job['shotId'],
+        )['order'],
+        media: Directory(path('media')),
+        token: token,
+        validateMedia: packageMediaCheck,
+      );
+      if (await cancelled(job['id'])) throw StateError('speechCancelled');
+      await mutate(job['projectId'], (p) {
+        if (!(p['shots'] as List).any((s) => s['id'] == job['shotId'])) {
+          throw StateError('shotMissing');
+        }
+        (p['assets'] as List).add(asset);
+      });
+      job['resultId'] = asset['id'];
+      job['message'] = 'speechSaved';
+    } catch (_) {
+      if (asset != null) {
+        var referenced = true;
+        try {
+          referenced = ((await rawProject(job['projectId']))['assets'] as List)
+              .any((a) => a['id'] == asset!['id']);
+        } catch (error) {
+          if (error is StateError && error.message == 'projectMissing') {
+            referenced = false;
+          }
+        }
+        if (!referenced) {
+          try {
+            await File(path(asset['file'])).delete();
+          } catch (_) {}
+        }
+      }
+      rethrow;
+    } finally {
+      _speechTokens.remove(job['id']);
+      await credentials.delete('job-${job['id']}');
+    }
+  }
+
+  Future<Project> importPackageStream(
+    Stream<List<int>> stream, {
+    int? length,
+    PackageCancellation? cancellation,
+    PackageProgress? progress,
+  }) async {
+    final project = await _packages!.importStream(
+      stream,
+      length: length,
+      cancellation: cancellation,
+      progress: progress,
+    );
+    onChanged?.call();
+    return Project.fromJson(decorate(project));
+  }
+
+  Future<Json> archive(
+    String id, {
+    PackageCancellation? cancellation,
+    PackageProgress? progress,
+  }) async {
+    if (!_archiveBusy.add(id)) throw StateError('taskExists');
+    try {
+      final raw = await rawProject(id);
+      final entry = await _packages!.exportProject(
+        raw,
+        cancellation: cancellation,
+        progress: progress,
+      );
+      try {
+        final result = await mutate(
+          id,
+          (p) => (p['exports'] as List).add(entry),
+        );
+        await _packages!.completeExport(entry);
+        return result;
+      } catch (_) {
+        var referenced = true;
+        Json? persisted;
+        try {
+          persisted = await rawProject(id);
+          referenced = (persisted['exports'] as List).any(
+            (e) => e['id'] == entry['id'],
+          );
+        } catch (_) {
+          /* retain the file while database state is unknown */
+        }
+        if (persisted != null && referenced) {
+          await _packages!.completeExport(entry);
+          return decorate(persisted);
+        }
+        if (!referenced) {
+          try {
+            await File(path(entry['file'])).delete();
+            await _packages!.completeExport(entry);
+          } catch (_) {}
+        }
+        rethrow;
+      }
+    } finally {
+      _archiveBusy.remove(id);
+    }
+  }
+
+  Future<void> seedDemo() async {
+    final p = newProject({
+      'name': language == 'zh' ? '雨夜来信' : 'Letters in the rain',
+      'description': language == 'zh'
+          ? '一封迟到的信，让两个人的命运在雨夜交汇。'
+          : 'A letter arrives three years late. Two strangers meet in the rain.',
+      'script': language == 'zh'
+          ? '角色：林晚、陈序\n雨夜，便利店的灯还亮着。\n林晚：你为什么现在才来？\n陈序递来一封没有署名的信。'
+          : 'Cast: Maya, Sam\nThe last bus leaves a rain-soaked street.\nMaya: Why did you come back?\nA stranger offers an unsigned letter.',
+    }, language: language);
+    for (final (i, shot) in (p['shots'] as List).indexed) {
+      final data = await rootBundle.load('assets/demo-${i + 1}.png');
+      final file = 'media/${newId()}.png';
+      await File(path(file)).writeAsBytes(data.buffer.asUint8List());
+      addCandidate(
+        p,
+        shot['id'],
+        {
+          'id': newId(),
+          'file': file,
+          'name': 'Demo ${i + 1}.png',
+          'kind': 'image',
+          'size': data.lengthInBytes,
+        },
+        shot['prompt'],
+        'demo',
+      );
+    }
+    for (final (index, character) in (p['characters'] as List).indexed) {
+      character['referenceId'] = p['assets'][index]['id'];
+      character['description'] = language == 'zh'
+          ? '深色短发，灰绿色外衣。定妆与场景参考请逐镜确认。'
+          : 'Dark short hair, grey-green outerwear. Review appearance and scene continuity shot by shot.';
+    }
+    await records!.put('project', p);
+    onChanged?.call();
+  }
+
+  List<Json> findings(Project p) => [
+    for (final shot in p.shots) ...[
+      if (shot.selected == null) {'shotId': shot.id, 'code': 'missingMedia'},
+      if (shot.scene.trim().isEmpty)
+        {'shotId': shot.id, 'code': 'missingScene'},
+      if (shot.review == 'changes')
+        {'shotId': shot.id, 'code': 'changes', 'detail': shot.note},
+      if (shot.characterIds.any(
+        (id) =>
+            p.characters.any((c) => c['id'] == id && c['referenceId'] == null),
+      ))
+        {'shotId': shot.id, 'code': 'missingReference'},
+    ],
+  ];
+  Future<Json> visualReview(String id, String shotId) async {
+    final p = await rawProject(id);
+    final shot = (p['shots'] as List).firstWhere((s) => s['id'] == shotId);
+    final version = (shot['versions'] as List).firstWhere(
+      (v) => v['id'] == shot['selectedVersionId'],
+    );
+    final asset = (p['assets'] as List).firstWhere(
+      (a) => a['id'] == version['assetId'],
+    );
+    if (asset['kind'] != 'image') throw StateError('imageReviewOnly');
+    final config = (await settings(secrets: true))['agent'] as Json;
+    final bytes = await File(path(asset['file'])).readAsBytes();
+    if (bytes.length > 10 * 1024 * 1024) throw StateError('responseTooLarge');
+    final response = await providers.json(
+      'POST',
+      Uri.parse('${endpoint(config['endpoint'])}/chat/completions'),
+      key: config['apiKey'],
+      body: {
+        'model': config['model'],
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'text',
+                'text':
+                    'Review this shot for visible continuity and composition problems. Do not claim comparison to unseen references. Answer in $language. Shot: ${shot['prompt']}',
+              },
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': 'data:image/png;base64,${base64Encode(bytes)}',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    );
+    final text = response['choices']?[0]?['message']?['content'];
+    if (text is! String) throw StateError('invalidResponse');
+    return mutate(id, (next) {
+      final current = (next['shots'] as List).firstWhere(
+        (s) => s['id'] == shotId,
+      );
+      if (current['selectedVersionId'] != version['id']) {
+        throw StateError('staleRevision');
+      }
+      current['visualReview'] = {
+        'versionId': version['id'],
+        'text': text,
+        'createdAt': timestamp(),
+        'frameCount': 1,
+        'referenceIds': [],
+      };
+    });
+  }
+
+  Future<Json> chat(String id, String text, String? skill) async {
+    if (text.trim().isEmpty) throw ArgumentError('required');
+    if (!_agentBusy.add(id)) throw StateError('agentBusy');
+    try {
+      final p = await rawProject(id),
+          config = (await settings(secrets: true))['agent'] as Json;
+      final skills = await request('/skills') as List;
+      final selected = skills.where((s) => s['name'] == skill).firstOrNull;
+      if (skill != null && selected == null) {
+        throw ArgumentError('invalidSkill');
+      }
+      await mutate(
+        id,
+        (p) => (p['messages'] as List).add({
+          'id': newId(),
+          'role': 'user',
+          'text': text,
+          'createdAt': timestamp(),
+        }),
+      );
+      final answer = await runDirector(
+        providers: providers,
+        config: config,
+        language: language,
+        text: text,
+        skill:
+            '${selected?['content'] ?? ''}\nConfigured MCP servers: ${jsonEncode(((await settings())['mcp'] as List).where((m) => m['enabled'] == true).map((m) => {'id': m['id'], 'name': m['name']}).toList())}',
+        history: (p['messages'] as List).cast<Json>(),
+        execute: (name, args) async {
+          switch (name) {
+            case 'mcp_tools':
+              return remoteTools.list(await _server(args['serverId']));
+            case 'mcp_request':
+              final server = await _server(args['serverId']);
+              final approval = <String, dynamic>{
+                'id': newId(),
+                'projectId': id,
+                'serverId': server['id'],
+                'url': server['url'],
+                'tool': args['tool'],
+                'arguments': Map<String, dynamic>.from(args['arguments']),
+                'state': 'pending',
+                'createdAt': timestamp(),
+              };
+              await records!.put('approval', approval);
+              onChanged?.call();
+              return {
+                'approvalId': approval['id'],
+                'state': 'pending',
+                'message':
+                    'Waiting for user approval. The tool has not executed.',
+              };
+
+            case 'project_read':
+              return rawProject(id);
+            case 'quality_check':
+              return findings(await project(id));
+            case 'shot_update':
+              return mutate(
+                id,
+                (p) => patchShot(
+                  p,
+                  args['shotId'],
+                  Map<String, dynamic>.from(args['patch']),
+                ),
+              );
+            case 'shot_reorder':
+              return mutate(
+                id,
+                (p) => reorder(p, List<String>.from(args['shotIds'])),
+              );
+            case 'storyboard_set':
+              return mutate(id, (p) {
+                if ((p['shots'] as List).any(
+                  (s) => (s['versions'] as List).isNotEmpty,
+                )) {
+                  throw StateError('hasMedia');
+                }
+                final shots = (args['shots'] as List).cast<Json>();
+                if (shots.isEmpty || shots.length > 60) {
+                  throw ArgumentError('shotLimit');
+                }
+                p['shots'] = shots.indexed
+                    .map((entry) => emptyShot(entry.$1 + 1, language: language))
+                    .toList();
+                for (var i = 0; i < shots.length; i++) {
+                  patchShot(p, p['shots'][i]['id'], shots[i]);
+                }
+              });
+            default:
+              throw ArgumentError('unsupportedAction');
+          }
+        },
+      );
+      return mutate(
+        id,
+        (p) => (p['messages'] as List).add({
+          'id': newId(),
+          'role': 'assistant',
+          'text': answer,
+          'createdAt': timestamp(),
+          'skill': skill,
+        }),
+      );
+    } finally {
+      _agentBusy.remove(id);
+    }
+  }
+
+  Future<Json> _server(String id) async {
+    final config = await settings(secrets: true);
+    return (config['mcp'] as List).cast<Json>().firstWhere(
+      (m) => m['id'] == id && m['enabled'] == true,
+      orElse: () => throw StateError('invalidMcp'),
+    );
+  }
+
+  Future<Json> decide(String id, bool approve) async {
+    final request = await exclusive(() async {
+      final item = (await records!.all(
+        'approval',
+      )).firstWhere((a) => a['id'] == id);
+      if (item['state'] != 'pending') throw StateError('taskFinished');
+      item['state'] = approve ? 'running' : 'rejected';
+      await records!.put('approval', item);
+      onChanged?.call();
+      return item;
+    });
+    if (!approve) return request;
+    try {
+      final server = await _server(request['serverId']);
+      if (server['url'] != request['url']) throw StateError('staleRevision');
+      final result = await remoteTools.call(
+        server,
+        request['tool'],
+        Map<String, dynamic>.from(request['arguments']),
+      );
+      var text = jsonEncode(result);
+      final token = '${server['token'] ?? ''}';
+      if (token.isNotEmpty) text = text.replaceAll(token, '[redacted]');
+      request['result'] = text.length > 50000 ? text.substring(0, 50000) : text;
+      request['state'] = result['isError'] == true ? 'failed' : 'approved';
+    } catch (_) {
+      request['state'] = 'failed';
+      request['result'] =
+          'External execution did not complete. Review the remote service before retrying.';
+    }
+    await records!.put('approval', request);
+    onChanged?.call();
+    return request;
+  }
+
+  Future<void> close() => _closeFuture ??= _close();
+  Future<void> _close() async {
+    _closed = true;
+    for (final token in _speechTokens.values) {
+      token.cancel();
+    }
+    for (final token in _imageTokens.values) {
+      token.cancel();
+    }
+    client.close();
+    for (final job in await records?.all('job') ?? <Json>[]) {
+      if (job['type'] == 'export' && job['state'] == 'running') {
+        await renderer.cancel(job['id']);
+        await renderer.cancel('${job['id']}-image');
+      }
+    }
+    await _pumpDone?.future;
+    await _packages?.close();
+    await _mutations;
+    await records?.close();
+  }
+}
+
+const builtInSkills = <Json>[
+  {
+    'name': 'story-director',
+    'description': 'Story direction / 剧本与镜头',
+    'content':
+        'Build a short-drama hook, character goals, shot-by-shot action and episode cliffhanger. Keep each shot producible. Avoid inventing generated assets.',
+  },
+  {
+    'name': 'shot-repair',
+    'description': 'Shot repair / 镜头返修',
+    'content':
+        'Focus on the specified failed shot. Preserve approved shots, face, wardrobe and setting. Propose one precise repair prompt and a manual acceptance checklist.',
+  },
+  {
+    'name': 'marketing-variants',
+    'description': 'Marketing variations / 营销变体',
+    'content':
+        'Propose three distinct opening hooks, honest product benefits and a clear CTA. Preserve the approved brand and character references. Do not invent performance claims.',
+  },
+];

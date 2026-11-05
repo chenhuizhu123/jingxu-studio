@@ -1,0 +1,34 @@
+appId: studio.jingxu.app
+productName: 镜序 Studio
+icon: resources/icon.png
+artifactName: Jingxu-Studio-${version}-${os}-${arch}.${ext}
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+  - "!dist/**/*.map"
+asarUnpack:
+  - dist/runtime/fonts/**
+  - node_modules/ffmpeg-static/**
+  - node_modules/@img/**
+  - node_modules/sharp/**
+  - node_modules/sql.js/dist/*.wasm
+npmRebuild: false
+mac:
+  category: public.app-category.video
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  extendInfo:
+    NSDocumentsFolderUsageDescription: 用于导入剧本、素材和保存成片。
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

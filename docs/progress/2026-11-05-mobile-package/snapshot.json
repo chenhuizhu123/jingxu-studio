@@ -1,0 +1,63 @@
+{
+  "generatedAt": "2026-11-05T03:44:49.386626+00:00",
+  "kind": "Flutter in-memory widget goldens; not OS or device screenshots",
+  "size": "390x844",
+  "files": [
+    {
+      "file": "cast-en.png",
+      "sha256": "deb74cc941731d1d0f3bc77d8f6ca75f6b2a685ed625610c699bc000886795ea"
+    },
+    {
+      "file": "cast-zh.png",
+      "sha256": "090491524975be77dcd0115775f7d8d2560f52d905c6a4eef0bf760f1aba10ea"
+    },
+    {
+      "file": "export-en.png",
+      "sha256": "42aec8ddb35be7ceb4f22ff6b0e7a4bf46ffb2aa799b3287943037a481762e86"
+    },
+    {
+      "file": "export-zh.png",
+      "sha256": "3ddaaf34accb58575550f55b9e883c713feed113c32dee73d379ffcf045fa09e"
+    },
+    {
+      "file": "library-en.png",
+      "sha256": "51b10f3581a47fa913d08daadb38ab1ec1fdd398d01b3990135620cb052733f3"
+    },
+    {
+      "file": "library-zh.png",
+      "sha256": "4a55c4ece57d2a64c7b0107d1b4de5b1e5ade3e60e47691dd0682f961a0ae3fd"
+    },
+    {
+      "file": "package-complete-en.png",
+      "sha256": "22d1d379bafc543e1fd3ad49cb631745610aff408b889676144cc5da0f1daf74"
+    },
+    {
+      "file": "package-complete-zh.png",
+      "sha256": "86365a41d607450607ab89db4b8845bc99ae6a94d778a5df69a1285af7221328"
+    },
+    {
+      "file": "package-ready-en.png",
+      "sha256": "30fde88f4acb735c8abc2fbfda9fa247a7dc7c46f7467f5a0527e7298ed403af"
+    },
+    {
+      "file": "package-ready-zh.png",
+      "sha256": "9701f3dec1e48f87a44081a3a672ae7958dbbb675287d6e2e66655d77182dde8"
+    },
+    {
+      "file": "shot-en.png",
+      "sha256": "db45e4649a9b8fbeb3bea5f21af365c507d85ebf8f128a9b8015462aab794b8f"
+    },
+    {
+      "file": "shot-zh.png",
+      "sha256": "63761bb75e4cde885358fcfaefd630649d7b9366965cc999cb18e6e3cbc4f2ef"
+    },
+    {
+      "file": "storyboard-en.png",
+      "sha256": "fd9fd0ee4a1fd36f365b4ae613ee9343c4f50725d8ee4688381a8249d8d09c0d"
+    },
+    {
+      "file": "storyboard-zh.png",
+      "sha256": "a74ae8542eb26335bad80a2899c215708e9a36808e6e818dfa2ae60bcf6dbeb2"
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+name: Release clients
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+
+jobs:
+  package-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify tag matches desktop version
+        run: node -e "const v=require('./package.json').version; if('v'+v!==process.env.TAG) throw new Error('tag '+process.env.TAG+' != package.json v'+v)"
+        env:
+          TAG: ${{ github.ref_name }}
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --mac --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - run: npm run test:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.yml
+            release/*.blockmap
+
+  package-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify tag matches desktop version
+        run: node -e "const v=require('./package.json').version; if('v'+v!==process.env.TAG) throw new Error('tag '+process.env.TAG+' != package.json v'+v)"
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+      - run: npm ci
+      - run: npm run package:win
+      - run: npm run test:package
+      - run: npm run test:win:structure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-win
+          path: |
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
+
+  package-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.0"
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: flutter pub get
+        working-directory: apps/mobile
+      - run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+        working-directory: apps/mobile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run mobile:verify:android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: |
+            release/*.apk
+            release/android-package-check.json
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [package-mac, package-win, package-android]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: 镜序 Studio ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+            artifacts/**/*.apk
+            artifacts/**/*.yml
+            artifacts/**/*.blockmap
+            artifacts/**/*.json

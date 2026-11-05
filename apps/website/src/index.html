@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0b0c0f" />
+    <meta
+      name="description"
+      content="镜序 Studio，把剧本、角色、分镜、候选版本和交付留在一个工作空间。为短剧与营销视频创作者减少重复操作和返工。"
+    />
+    <meta property="og:title" content="镜序 Studio · 让每个镜头，值得交付" />
+    <meta
+      property="og:description"
+      content="从故事到成片，每一次修改都有来处。短剧制作与镜头返修工作台。"
+    />
+    <title>镜序 Studio · 让每个镜头，值得交付</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <a class="skip" href="#main">跳到主要内容</a>
+    <header class="nav">
+      <a class="logo" href="#"
+        ><span class="logo-mark">镜</span
+        ><strong>镜序 <small>STUDIO</small></strong></a
+      >
+      <nav aria-label="主导航">
+        <a href="#workflow">工作方式</a><a href="#demo">体验返修</a
+        ><a href="#platforms">多端创作</a><a href="#pricing">价格计划</a>
+      </nav>
+      <a href="/en/" lang="en" hreflang="en">English</a
+      ><a class="button small" href="#downloads">查看预览版 <span>↗</span></a>
+    </header>
+    <main id="main">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow"><span></span>给视频创作者的 AI 创作工作台</div>
+          <h1>你的脑洞，<br /><em>该成片了。</em></h1>
+          <p>
+            短剧、品牌短片、自媒体内容。<br />把剧本、分镜、候选返修和交付，接进同一条创作流程。
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="#demo">先试一镜 <span>↗</span></a
+            ><a class="text-button" href="#workflow"
+              ><span class="play">▶</span>看看怎么做</a
+            >
+          </div>
+          <div class="hero-footnote">
+            <span>✓ 自带模型 API Key</span><span>✓ 项目本地优先</span
+            ><span>✓ 好镜头不用重来</span>
+          </div>
+        </div>
+        <div class="hero-art" aria-label="电影感概念封面与剪辑时间线示意">
+          <div class="creator-reel-label">
+            <span>JINGXU / CREATOR REEL</span><b>IMAGINATION ON.</b>
+          </div>
+          <div class="hero-frames">
+            <div class="creator-frame frame-one">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 0"
+                alt="霓虹夜景人像概念"
+                loading="eager"
+                decoding="async"
+              /><span class="frame-number">01 / CONCEPT</span>
+              <div class="frame-info">
+                <span>SHORT DRAMA</span><strong>NIGHT SHIFT</strong>
+              </div>
+            </div>
+            <div class="creator-frame frame-two">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 1"
+                alt="流体金属品牌视觉概念"
+                fetchpriority="high"
+                decoding="async"
+              /><span class="frame-number">02 / CONCEPT</span>
+              <div class="frame-info">
+                <span>BRAND FILM</span><strong>CHROME DREAMS</strong>
+              </div>
+            </div>
+            <div class="creator-frame frame-three">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 2"
+                alt="街头舞蹈短片概念"
+                loading="eager"
+                decoding="async"
+              /><span class="frame-number">03 / CONCEPT</span>
+              <div class="frame-info">
+                <span>SOCIAL CONTENT</span><strong>OFF THE BEAT</strong>
+              </div>
+            </div>
+          </div>
+          <a class="repair-chip" href="#demo"
+            ><span class="spark">✦</span>
+            <div>
+              <strong>只重做这一镜，满意的继续保留。</strong
+              ><small>新增候选 · 对比选择 · 接着创作</small>
+            </div>
+            <span class="note-check">↗</span></a
+          >
+          <div class="hero-sequence">
+            <div class="sequence-heading">
+              <span>STORY CUT / 00:12</span
+              ><button
+                class="sequence-toggle"
+                id="hero-motion"
+                type="button"
+                aria-pressed="false"
+              >
+                <span>播放排版动效</span>
+              </button>
+            </div>
+            <div class="sequence-track" aria-hidden="true">
+              <i></i><i></i><i></i><b class="playhead"></b>
+            </div>
+          </div>
+          <p class="concept-note">
+            AI 概念视觉 · 排版动效示意，不代表视频模型生成效果
+          </p>
+        </div>
+      </section>
+      <div class="creator-strip" aria-label="为多种视频创作场景而做">
+        <span>STORYTELLERS</span><i>✳</i><span>VIDEO MAKERS</span><i>✳</i
+        ><span>BRAND BUILDERS</span><i>✳</i><span>CONTENT CREATORS</span>
+      </div>
+      <section class="statement">
+        <span class="eyebrow">LESS REWORK. MORE STORY.</span>
+        <h2>把时间留给创意，<br />把重复操作交给镜序。</h2>
+        <p>
+          人物参考、场景设定、提示词、候选镜头和导出版本有据可查。<br />看清哪里需要修改，也看清哪些成果值得保留。
+        </p>
+        <div class="statement-tags">
+          <span>剧本与分镜</span><i>—</i><span>角色与参考</span><i>—</i
+          ><span>生成与返修</span><i>—</i><span>版本与交付</span>
+        </div>
+      </section>
+      <section id="workflow" class="workflow section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">01 / THE CREATIVE PROCESS</div>
+            <h2>从一个脑洞，<br />到一条能交付的片。</h2>
+          </div>
+          <p>
+            一条有进度、能回头、可继续的流程。<br />你的判断，始终是创作的一部分。
+          </p>
+        </div>
+        <div class="workflow-layout">
+          <div class="steps" role="tablist" aria-label="创作流程">
+            <button
+              class="active"
+              role="tab"
+              aria-selected="true"
+              data-step="0"
+            >
+              <span>01</span>
+              <div>
+                <h3>把故事变成分镜</h3>
+                <p>整理镜头、景别、时长与对白，逐镜修改。</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="1">
+              <span>02</span>
+              <div>
+                <h3>让角色有共同的起点</h3>
+                <p>保存人设与定妆参考，把设定带进镜头。</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="2">
+              <span>03</span>
+              <div>
+                <h3>逐镜返修，保留满意</h3>
+                <p>返修生成新增候选，随时对比、回选。</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="3">
+              <span>04</span>
+              <div>
+                <h3>每次交付，都有版本</h3>
+                <p>导出成片、字幕、分镜和项目素材包。</p>
+              </div>
+              <b>↗</b>
+            </button>
+          </div>
+          <div class="process-preview" role="tabpanel" id="process-panel">
+            <div class="window-bar">
+              <span></span><span></span><span></span
+              ><small>镜序 Studio / 制作空间</small>
+            </div>
+            <div id="step-content"></div>
+            <div class="preview-bottom">
+              <span class="green-dot"></span><span>操作示意 · 数据不会上传</span
+              ><span>JINGXU / STUDIO</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="demo" class="demo-section">
+        <div class="section demo-inner">
+          <div class="section-top">
+            <div>
+              <div class="eyebrow">02 / MAKE THE NEXT TAKE BETTER</div>
+              <h2>这一镜没到位？<br /><em>换个候选，继续。</em></h2>
+            </div>
+            <p>
+              试着选择镜头、填写返修要求，再建立一个候选。<br />这是本地交互演示，不会调用生成服务或消耗额度。
+            </p>
+          </div>
+          <div class="demo-workspace">
+            <aside>
+              <div class="demo-brand">镜序 <small>STUDIO</small></div>
+              <div class="demo-project">雨夜来信 <span>R12</span></div>
+              <span class="demo-nav active">▦ 分镜工作台</span
+              ><span class="demo-nav">◉ 角色与场景</span
+              ><span class="demo-nav">✓ 检查与返修</span
+              ><span class="demo-nav">↗ 交付中心</span>
+              <div class="demo-mode">● 演示模式</div>
+            </aside>
+            <div class="demo-board">
+              <div class="demo-board-head">
+                <h3>把故事，拍成镜头</h3>
+                <span>6 个镜头</span>
+              </div>
+              <div class="demo-shots" id="demo-shots"></div>
+              <div class="demo-timeline" aria-hidden="true">
+                <span>故事时间线</span>
+                <div id="timeline"></div>
+              </div>
+            </div>
+            <div class="demo-inspector">
+              <div class="demo-inspector-heading">
+                镜头设置 <span id="shot-label">SHOT 03</span>
+              </div>
+              <div class="demo-preview">
+                <img
+                  id="demo-preview"
+                  src="/assets/scene-3.svg"
+                  alt="选中镜头预览"
+                /><span>演示插画</span>
+              </div>
+              <div class="demo-version">
+                <span id="selected-version">已选 V1</span
+                ><span id="version-count">1 个候选</span>
+              </div>
+              <label for="repair-note">局部返修要求</label
+              ><textarea id="repair-note" rows="3">
+保留雨夜场景与服装，修正人物转头后的面部。</textarea
+              ><button id="create-candidate" class="button">
+                ✧ 建立演示候选
+              </button>
+              <div class="candidate-list" id="candidate-list"></div>
+              <p class="demo-disclaimer">
+                演示仅展示版本操作；真实生成需要配置服务与
+                Key。参考图帮助维持一致性，结果仍需检查。
+              </p>
+            </div>
+          </div>
+          <p class="demo-result" id="demo-result" role="status">
+            选择一个镜头，体验可回溯的修改过程。
+          </p>
+        </div>
+      </section>
+      <section id="platforms" class="platforms section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">03 / YOUR WORK, WHERE YOU ARE</div>
+            <h2>大屏专注创作，<br />手机也能做。</h2>
+          </div>
+          <p>
+            项目、素材和候选保存在当前设备。<br />桌面与手机都以本地创作为起点。
+          </p>
+        </div>
+        <div class="platform-grid">
+          <article class="desktop-platform">
+            <div class="platform-icon">⌘</div>
+            <span class="eyebrow">MACOS + WINDOWS</span>
+            <h3>留给专注创作的工作台。</h3>
+            <p>
+              完整分镜、角色参考、任务队列和批量交付。<br />项目、素材与渲染保存在本机。
+            </p>
+            <div class="mini-editor">
+              <div>
+                <span>01</span><span>02</span><span class="selected">03</span
+                ><span>04</span>
+              </div>
+              <div><i></i><i></i><i></i><i></i></div>
+            </div>
+          </article>
+          <article class="mobile-platform">
+            <div>
+              <div class="platform-icon">▯</div>
+              <span class="eyebrow">IOS + ANDROID</span>
+              <h3>灵感出现，<br />随时接上。</h3>
+              <p>
+                Flutter
+                原生客户端，触屏预览、裁切排序、候选对比、本地渲染和系统分享。生成请求直连你配置的服务商。
+              </p>
+            </div>
+            <div class="phone">
+              <div class="phone-notch"></div>
+              <span>雨夜来信</span
+              ><img src="/assets/scene-2.svg" alt="手机上的镜头预览示意" />
+              <div class="phone-caption">镜头 02 <small>V2 · 已选</small></div>
+              <div class="phone-button">✓ 选用这个版本</div>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section class="principles section">
+        <div>
+          <div class="eyebrow">BUILT AROUND YOUR WORK</div>
+          <h2>放开创作。<br />好成果，有地方留。</h2>
+        </div>
+        <div class="principle-list">
+          <article>
+            <span>01</span>
+            <div>
+              <h3>已有成果，值得被保留。</h3>
+              <p>
+                新增候选与当前已选版本分开。每次修改有历史，满意的镜头不用重新开始。
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>02</span>
+            <div>
+              <h3>模型和工作方法，由你选择。</h3>
+              <p>
+                自带 API Key，通过 MCP 接工具，用 Skills
+                保存创作标准。费用与服务边界清楚可见。
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>03</span>
+            <div>
+              <h3>诚实面对生成质量。</h3>
+              <p>
+                参考图是约束，不是绝不崩脸的承诺。规则检查与人工预览一起帮助你把关。
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section id="pricing" class="pricing section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">04 / START WITH A REAL PROJECT</div>
+            <h2>先做一条片，<br />再决定要不要长期用。</h2>
+          </div>
+          <p>
+            当前为开发预览，尚未开放收费。<br />模型生成费用由你选择的服务商单独收取。
+          </p>
+        </div>
+        <div class="pricing-grid">
+          <article>
+            <span class="plan-type">开发预览</span>
+            <h3>把流程跑通。</h3>
+            <div class="price">免费 <small>当前阶段</small></div>
+            <ul>
+              <li>项目、分镜与候选版本</li>
+              <li>导入素材与本地 MP4 渲染</li>
+              <li>自带 API Key、MCP 与 Skills</li>
+              <li>镜头返修与项目素材包</li>
+            </ul>
+            <a class="button outline" href="#downloads">查看版本状态 ↗</a>
+            <p>未配置 Key 时可使用标注清楚的演示素材。</p>
+          </article>
+          <article class="professional">
+            <div class="plan-badge">定价验证中</div>
+            <span class="plan-type">专业工作室</span>
+            <h3>让生产变得可持续。</h3>
+            <div class="price">¥99 <small>/ 月 · 拟定测试价格</small></div>
+            <ul>
+              <li>规划：团队协作与审核</li>
+              <li>规划：跨设备项目同步</li>
+              <li>规划：更完整的音画与字幕处理</li>
+              <li>规划：工作流模板和批量生产</li>
+            </ul>
+            <button class="button" data-trial-feedback>
+              告诉我们你的选择 ↗
+            </button>
+            <p>尚不可购买，不会扣费。价格与功能待试用验证。</p>
+          </article>
+        </div>
+      </section>
+      <section id="downloads" class="downloads section">
+        <div>
+          <div class="eyebrow">AVAILABLE AS DEVELOPMENT PREVIEW</div>
+          <h2>你的下一部作品，<br />从这里开始。</h2>
+          <p>
+            拿到工作区的桌面预览安装包，就能用三个内置竖屏镜头试做一支短片。打开、渲染和下载全程无需
+            API Key。
+          </p>
+          <ol class="trial-steps">
+            <li>打开镜序 Studio，点「打开试用工程」。</li>
+            <li>在交付中心选择「渲染成片」，查看本机渲染进度。</li>
+            <li>从导出记录下载 MP4 和 SRT，再记录这次试用结果。</li>
+          </ol>
+          <a class="button" href="/samples/jingxu-rain-sample-zh.zip" download>
+            下载示例工程 <span aria-hidden="true">↓</span>
+          </a>
+          <button
+            class="button trial-feedback-button"
+            type="button"
+            data-trial-feedback
+          >
+            记录试用结果
+          </button>
+          <p>
+            手机端可下载此示例 ZIP，从项目页右上角导入，在「交付」中点「渲染
+            MP4」。
+          </p>
+        </div>
+        <div class="release-grid">
+          <div>
+            <strong>macOS</strong
+            ><span id="status-mac">0.1.10 · Apple Silicon 预览</span
+            ><small>已构建，未签名与公证</small>
+          </div>
+          <div>
+            <strong>Windows</strong
+            ><span id="status-win">0.1.10 · Windows x64 预览</span
+            ><small>交叉构建通过，待 Windows 实机验证</small>
+          </div>
+          <div>
+            <strong>iOS</strong
+            ><span id="status-ios">0.1.6 · iOS 模拟器预览</span
+            ><small>需要 Xcode Simulator，无法安装到 iPhone</small>
+          </div>
+          <div>
+            <strong>Android</strong
+            ><span id="status-android">0.1.6 · Android ARM64 预览</span
+            ><small>APK 测试签名通过，待设备验证</small>
+          </div>
+        </div>
+      </section>
+      <section class="faq section">
+        <div>
+          <div class="eyebrow">BEFORE YOUR FIRST SHOT</div>
+          <h2>开始前，<br />你可能想知道。</h2>
+        </div>
+        <div>
+          <details>
+            <summary>镜序自己训练视频生成大模型吗？<span>+</span></summary>
+            <p>
+              镜序专注制作编排、镜头返修与版本交付。生成能力来自你配置的服务商，已有素材也能导入项目继续制作。
+            </p>
+          </details>
+          <details>
+            <summary>能保证角色和场景始终一致吗？<span>+</span></summary>
+            <p>
+              不能保证。角色与场景参考有助于约束生成方向；你仍需检查具体镜头。镜序帮助保留参考、定位修改范围和管理候选结果。
+            </p>
+          </details>
+          <details>
+            <summary>没有 API Key，也能体验吗？<span>+</span></summary>
+            <p>
+              可以使用明确标注的演示素材，或导入自己的图片与视频，体验分镜、版本选择、返修记录和导出。在线生成需要配置有权限和额度的
+              Key。
+            </p>
+          </details>
+          <details>
+            <summary>手机会在本地生成和渲染视频吗？<span>+</span></summary>
+            <p>
+              手机项目、素材、版本和剪辑导出在本机处理，无需镜序服务器或连接桌面。AI
+              生成请求直连用户配置的服务商，需要网络与 API
+              Key；本地导出时请保持应用打开。
+            </p>
+          </details>
+          <details>
+            <summary>我的素材和 Key 会放在哪里？<span>+</span></summary>
+            <p>
+              默认保存在当前设备。调用生成服务时，必要的提示词和参考素材会发送给你配置的服务商。Key
+              加密保存，不通过项目接口返回明文。
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <a class="logo" href="#"
+        ><span class="logo-mark">镜</span
+        ><strong>镜序 <small>STUDIO</small></strong></a
+      >
+      <p>让每个镜头，值得交付。</p>
+      <div>
+        <a href="/privacy.html">隐私说明</a><a href="/terms.html">使用说明</a
+        ><span>© 2026 镜序 Studio · 开发预览</span>
+      </div>
+    </footer>
+    <dialog id="feedback-dialog">
+      <form method="dialog">
+        <button class="close-dialog" aria-label="关闭">×</button>
+      </form>
+      <span class="eyebrow">BUILD SOMETHING WORTH PAYING FOR</span>
+      <h2>它能帮你省下什么？</h2>
+      <p>
+        这是一份本地定价调研。不会提交或上传你的信息；你可以下载记录，与产品负责人分享。
+      </p>
+      <form id="feedback-form">
+        <label
+          >试用设备<select name="platform" required>
+            <option value="">请选择</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="android">Android</option>
+            <option value="ios-simulator">iOS 模拟器</option>
+            <option value="not-installed">尚未安装</option>
+          </select></label
+        >
+        <label
+          >你完成到哪一步？<select name="outcome" required>
+            <option value="">请选择</option>
+            <option value="exported">已下载 MP4</option>
+            <option value="export-failed">打开了示例，导出失败</option>
+            <option value="opened-app">打开了应用，还没导出</option>
+            <option value="install-failed">下载或安装时遇到困难</option>
+            <option value="not-tried">还没试用</option>
+          </select></label
+        >
+        <label
+          >你最希望改善的环节<select name="priority">
+            <option>人物与场景一致性检查、返修</option>
+            <option>剧本拆镜与批量生成</option>
+            <option>字幕配音与剪辑</option>
+            <option>版本、团队审核与交付</option>
+          </select></label
+        ><label
+          >如果真实节省制作时间，你愿意尝试 ¥99/月 吗？<select
+            name="willingness"
+            required
+          >
+            <option value="">请选择</option>
+            <option value="yes">愿意，先用自己的项目试一试</option>
+            <option value="undecided">需要看到具体节省后再决定</option>
+            <option value="no">目前不愿付费</option>
+            <option value="skip">暂不回答</option>
+          </select></label
+        ><label
+          >你希望达到什么效果？<textarea
+            name="expectation"
+            rows="3"
+            placeholder="例如：修改一个镜头时，不用重做整集。"
+          ></textarea></label
+        ><button class="button" type="submit">下载我的试用需求 ↓</button>
+      </form>
+    </dialog>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

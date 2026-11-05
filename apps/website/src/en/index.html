@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0b0c0f" />
+    <meta
+      name="description"
+      content="A local-first production studio for short dramas and marketing videos. Keep scripts, references, shot candidates and delivery together."
+    />
+    <title>Jingxu Studio · Make every shot worth delivering</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
+    <link rel="alternate" hreflang="zh-CN" href="/" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="nav">
+      <a class="logo" href="#"
+        ><span class="logo-mark">J</span
+        ><strong>Jingxu <small>STUDIO</small></strong></a
+      >
+      <nav aria-label="Main navigation">
+        <a href="#workflow">Workflow</a><a href="#demo">Try shot repair</a
+        ><a href="#platforms">Your devices</a><a href="#pricing">Plans</a>
+      </nav>
+      <a href="/" lang="zh-CN" hreflang="zh-CN">中文</a
+      ><a class="button small" href="#downloads">Preview status ↗</a>
+    </header>
+    <main id="main">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span></span>THE AI VIDEO WORKSPACE FOR CREATORS
+          </div>
+          <h1>Big ideas.<br /><em>Better takes.</em></h1>
+          <p>
+            Short dramas. Brand films. Your next great post.<br />Keep scripts,
+            shots, revisions and delivery in one creative flow.
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="#demo">Try a new take <span>↗</span></a
+            ><a class="text-button" href="#workflow"
+              ><span class="play">▶</span>Explore the workflow</a
+            >
+          </div>
+          <div class="hero-footnote">
+            <span>✓ Bring your own API key</span
+            ><span>✓ Local-first projects</span
+            ><span>✓ Keep your good takes</span>
+          </div>
+        </div>
+        <div
+          class="hero-art"
+          aria-label="Cinematic concept covers and an illustrative editing timeline"
+        >
+          <div class="creator-reel-label">
+            <span>JINGXU / CREATOR REEL</span><b>IMAGINATION ON.</b>
+          </div>
+          <div class="hero-frames">
+            <div class="creator-frame frame-one">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 0"
+                alt="Neon city portrait concept"
+                loading="eager"
+                decoding="async"
+              /><span class="frame-number">01 / CONCEPT</span>
+              <div class="frame-info">
+                <span>SHORT DRAMA</span><strong>NIGHT SHIFT</strong>
+              </div>
+            </div>
+            <div class="creator-frame frame-two">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 1"
+                alt="Chrome sculpture film concept"
+                fetchpriority="high"
+                decoding="async"
+              /><span class="frame-number">02 / CONCEPT</span>
+              <div class="frame-info">
+                <span>BRAND FILM</span><strong>CHROME DREAMS</strong>
+              </div>
+            </div>
+            <div class="creator-frame frame-three">
+              <img
+                src="/assets/creator-triptych-v2.png"
+                style="--frame: 2"
+                alt="Street dance concept"
+                loading="eager"
+                decoding="async"
+              /><span class="frame-number">03 / CONCEPT</span>
+              <div class="frame-info">
+                <span>SOCIAL CONTENT</span><strong>OFF THE BEAT</strong>
+              </div>
+            </div>
+          </div>
+          <a class="repair-chip" href="#demo"
+            ><span class="spark">✦</span>
+            <div>
+              <strong>Refine one shot. Keep your cut.</strong
+              ><small>Add a candidate. Compare. Keep creating.</small>
+            </div>
+            <span class="note-check">↗</span></a
+          >
+          <div class="hero-sequence">
+            <div class="sequence-heading">
+              <span>STORY CUT / 00:12</span
+              ><button
+                class="sequence-toggle"
+                id="hero-motion"
+                type="button"
+                aria-pressed="false"
+              >
+                <span>Play motion study</span>
+              </button>
+            </div>
+            <div class="sequence-track" aria-hidden="true">
+              <i></i><i></i><i></i><b class="playhead"></b>
+            </div>
+          </div>
+          <p class="concept-note">
+            AI concept artwork · motion/layout study, not generated video output
+          </p>
+        </div>
+      </section>
+      <div class="creator-strip" aria-label="For video creators">
+        <span>STORYTELLERS</span><i>✳</i><span>VIDEO MAKERS</span><i>✳</i
+        ><span>BRAND BUILDERS</span><i>✳</i><span>CONTENT CREATORS</span>
+      </div>
+      <section class="statement">
+        <span class="eyebrow">LESS REWORK. MORE STORY.</span>
+        <h2>More time for ideas.<br />Less time doing it all again.</h2>
+        <p>
+          Character references, scene notes, prompts, candidates and exports
+          stay connected.<br />Know what needs a new take, and what is ready to
+          keep.
+        </p>
+        <div class="statement-tags">
+          <span>Script & storyboard</span><i>—</i><span>Cast & references</span
+          ><i>—</i><span>Generate & refine</span><i>—</i
+          ><span>Versions & delivery</span>
+        </div>
+      </section>
+      <section id="workflow" class="workflow section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">01 / THE CREATIVE PROCESS</div>
+            <h2>From a spark<br />to a cut worth sharing.</h2>
+          </div>
+          <p>
+            A workflow with progress, history and room to refine.<br />Your
+            judgment remains part of the process.
+          </p>
+        </div>
+        <div class="workflow-layout">
+          <div class="steps" role="tablist" aria-label="Production workflow">
+            <button
+              class="active"
+              role="tab"
+              aria-selected="true"
+              data-step="0"
+            >
+              <span>01</span>
+              <div>
+                <h3>Turn a story into shots</h3>
+                <p>Edit framing, timing, dialogue and shot direction.</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="1">
+              <span>02</span>
+              <div>
+                <h3>Give the cast a common reference</h3>
+                <p>Keep appearance and wardrobe with the shots.</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="2">
+              <span>03</span>
+              <div>
+                <h3>Refine a shot. Keep the good takes.</h3>
+                <p>Compare new candidates and return to earlier versions.</p>
+              </div>
+              <b>↗</b></button
+            ><button role="tab" aria-selected="false" data-step="3">
+              <span>04</span>
+              <div>
+                <h3>Make delivery traceable</h3>
+                <p>Export video, subtitles, storyboard and source assets.</p>
+              </div>
+              <b>↗</b>
+            </button>
+          </div>
+          <div class="process-preview" role="tabpanel" id="process-panel">
+            <div class="window-bar">
+              <span></span><span></span><span></span
+              ><small>Jingxu Studio / Production</small>
+            </div>
+            <div id="step-content"></div>
+            <div class="preview-bottom">
+              <span class="green-dot"></span
+              ><span>Workflow illustration · no upload</span
+              ><span>JINGXU / STUDIO</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="demo" class="demo-section">
+        <div class="section demo-inner">
+          <div class="section-top">
+            <div>
+              <div class="eyebrow">02 / MAKE THE NEXT TAKE BETTER</div>
+              <h2>One shot feels off?<br /><em>Try a better next take.</em></h2>
+            </div>
+            <p>
+              Choose a shot, describe a change and add a candidate.<br />This
+              local demo uses illustrations, with no model calls or credits.
+            </p>
+          </div>
+          <div class="demo-workspace">
+            <aside>
+              <div class="demo-brand">Jingxu <small>STUDIO</small></div>
+              <div class="demo-project">
+                Letters in the rain <span>R12</span>
+              </div>
+              <span class="demo-nav active">▦ Storyboard</span
+              ><span class="demo-nav">◉ Cast & scenes</span
+              ><span class="demo-nav">✓ Review & repair</span
+              ><span class="demo-nav">↗ Export</span>
+              <div class="demo-mode">● Demo mode</div>
+            </aside>
+            <div class="demo-board">
+              <div class="demo-board-head">
+                <h3>Bring your story into focus</h3>
+                <span>6 shots</span>
+              </div>
+              <div class="demo-shots" id="demo-shots"></div>
+              <div class="demo-timeline" aria-hidden="true">
+                <span>Story timeline</span>
+                <div id="timeline"></div>
+              </div>
+            </div>
+            <div class="demo-inspector">
+              <div class="demo-inspector-heading">
+                Shot settings <span id="shot-label">SHOT 03</span>
+              </div>
+              <div class="demo-preview">
+                <img
+                  id="demo-preview"
+                  src="/assets/scene-3.svg"
+                  alt="Selected sample shot"
+                /><span>Sample illustration</span>
+              </div>
+              <div class="demo-version">
+                <span id="selected-version">Selected V1</span
+                ><span id="version-count">1 candidate</span>
+              </div>
+              <label for="repair-note">Repair direction</label
+              ><textarea id="repair-note" rows="3">
+Keep the rainy setting and wardrobe. Refine the face after the head turns.</textarea
+              ><button id="create-candidate" class="button">
+                ✧ Add demo candidate
+              </button>
+              <div class="candidate-list" id="candidate-list"></div>
+              <p class="demo-disclaimer">
+                This demo shows version handling. Real generation needs your
+                provider and key. References guide consistency; review every
+                result.
+              </p>
+            </div>
+          </div>
+          <p class="demo-result" id="demo-result" role="status">
+            Choose a shot and try a revision you can return to.
+          </p>
+        </div>
+      </section>
+      <section id="platforms" class="platforms section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">03 / YOUR WORK, WHERE YOU ARE</div>
+            <h2>Big screen focus.<br />Small screen freedom.</h2>
+          </div>
+          <p>
+            Projects and assets stay on the current device.<br />Desktop and
+            mobile begin with a local workspace.
+          </p>
+        </div>
+        <div class="platform-grid">
+          <article class="desktop-platform">
+            <div class="platform-icon">⌘</div>
+            <span class="eyebrow">MACOS + WINDOWS</span>
+            <h3>A workspace for focused production.</h3>
+            <p>
+              Storyboards, character references, task queues and exports.<br />Local
+              project storage and local video rendering.
+            </p>
+            <div class="mini-editor">
+              <div>
+                <span>01</span><span>02</span><span class="selected">03</span
+                ><span>04</span>
+              </div>
+              <div><i></i><i></i><i></i><i></i></div>
+            </div>
+          </article>
+          <article class="mobile-platform">
+            <div>
+              <div class="platform-icon">▯</div>
+              <span class="eyebrow">IOS + ANDROID / FLUTTER</span>
+              <h3>Follow the idea<br />when it arrives.</h3>
+              <p>
+                Touch-friendly previews, shot order, trims, candidate
+                comparisons and sharing. Native mobile builds are undergoing
+                validation.
+              </p>
+            </div>
+            <div class="phone">
+              <div class="phone-notch"></div>
+              <span>Letters in the rain</span
+              ><img
+                src="/assets/scene-2.svg"
+                alt="Illustration of a mobile shot preview"
+              />
+              <div class="phone-caption">
+                Shot 02 <small>V2 · Selected</small>
+              </div>
+              <div class="phone-button">✓ Use this version</div>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section class="principles section">
+        <div>
+          <div class="eyebrow">BUILT AROUND YOUR WORK</div>
+          <h2>Create freely.<br />Keep what works.</h2>
+        </div>
+        <div class="principle-list">
+          <article>
+            <span>01</span>
+            <div>
+              <h3>Good takes deserve to stay.</h3>
+              <p>
+                New candidates keep the selected cut intact. Preserve the
+                history behind each creative decision.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>02</span>
+            <div>
+              <h3>Choose your model and your method.</h3>
+              <p>
+                Bring your own API key. Desktop MCP connections extend your
+                tools; Skills keep creative instructions reusable.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>03</span>
+            <div>
+              <h3>Be honest about generation quality.</h3>
+              <p>
+                References guide a model; they do not guarantee a perfect face.
+                Combine production checks with your own preview and review.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section id="pricing" class="pricing section">
+        <div class="section-top">
+          <div>
+            <div class="eyebrow">04 / START WITH A REAL PROJECT</div>
+            <h2>Make your first cut.<br />Then make up your mind.</h2>
+          </div>
+          <p>
+            This is a development preview. Payments are not enabled.<br />Your
+            generation provider charges its own usage fees.
+          </p>
+        </div>
+        <div class="pricing-grid">
+          <article>
+            <span class="plan-type">DEVELOPMENT PREVIEW</span>
+            <h3>Explore the complete workflow.</h3>
+            <div class="price">Free <small>during this stage</small></div>
+            <ul>
+              <li>Projects, storyboards and candidates</li>
+              <li>Imported assets and local MP4 rendering</li>
+              <li>BYOK, desktop MCP and Skills</li>
+              <li>Shot revisions and asset packages</li>
+            </ul>
+            <a class="button outline" href="#downloads"
+              >Check release status ↗</a
+            >
+            <p>Clearly labeled demo assets let you try without a key.</p>
+          </article>
+          <article class="professional">
+            <div class="plan-badge">PRICING RESEARCH</div>
+            <span class="plan-type">PRO STUDIO</span>
+            <h3>Build a sustainable workflow.</h3>
+            <div class="price">
+              CNY 99 <small>/ month · proposed test price</small>
+            </div>
+            <ul>
+              <li>Planned: team review and collaboration</li>
+              <li>Planned: optional cross-device sync</li>
+              <li>Planned: richer audio and subtitle processing</li>
+              <li>Planned: workflow templates and batch production</li>
+            </ul>
+            <button class="button" data-trial-feedback>
+              Tell us what would help ↗
+            </button>
+            <p>
+              Not available to purchase. No charge. Price and scope need user
+              validation.
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="downloads" class="downloads section">
+        <div>
+          <div class="eyebrow">DEVELOPMENT PREVIEW</div>
+          <h2>Your next story<br />starts here.</h2>
+          <p>
+            Install the desktop preview from the workspace and make a short with
+            three built-in vertical shots. Opening, rendering, and downloading
+            the sample require no API key.
+          </p>
+          <ol class="trial-steps">
+            <li>Launch Jingxu Studio and select Open the sample project.</li>
+            <li>
+              Select Render video in the export panel and follow the local
+              progress.
+            </li>
+            <li>
+              Download the MP4 and SRT from export history, then record how the
+              trial went.
+            </li>
+          </ol>
+          <a class="button" href="/samples/jingxu-rain-sample-en.zip" download>
+            Download sample project <span aria-hidden="true">↓</span>
+          </a>
+          <button
+            class="button trial-feedback-button"
+            type="button"
+            data-trial-feedback
+          >
+            Record trial results
+          </button>
+          <p>
+            On mobile, download this sample ZIP, import it from Projects, then
+            choose Render MP4 under Export.
+          </p>
+        </div>
+        <div class="release-grid">
+          <div>
+            <strong>macOS</strong><span>0.1.10 · Apple Silicon preview</span
+            ><small>Built, unsigned and unnotarized</small>
+          </div>
+          <div>
+            <strong>Windows</strong><span>0.1.10 · Windows x64 preview</span
+            ><small>Cross-built, Windows device validation pending</small>
+          </div>
+          <div>
+            <strong>iOS</strong><span>0.1.6 · iOS Simulator preview</span
+            ><small>Requires Xcode Simulator, unavailable on iPhone</small>
+          </div>
+          <div>
+            <strong>Android</strong><span>0.1.6 · Android ARM64 preview</span
+            ><small
+              >APK test signature verified, device validation pending</small
+            >
+          </div>
+        </div>
+      </section>
+      <section class="faq section">
+        <div>
+          <div class="eyebrow">BEFORE YOUR FIRST SHOT</div>
+          <h2>A few things<br />to know.</h2>
+        </div>
+        <div>
+          <details>
+            <summary>
+              Does Jingxu train its own video model?<span>+</span>
+            </summary>
+            <p>
+              Jingxu focuses on production, shot revisions and delivery.
+              Generation comes from your configured provider. You can also
+              import existing media.
+            </p>
+          </details>
+          <details>
+            <summary>
+              Is character consistency guaranteed?<span>+</span>
+            </summary>
+            <p>
+              No. References help guide generation, but every result needs
+              review. Jingxu keeps references and candidate history connected so
+              you can make a specific revision.
+            </p>
+          </details>
+          <details>
+            <summary>Can I try it without an API key?<span>+</span></summary>
+            <p>
+              Use clearly labeled demo illustrations or import your own images
+              and videos. Online generation requires an enabled model, key and
+              provider credits.
+            </p>
+          </details>
+          <details>
+            <summary>Does mobile require a workstation?<span>+</span></summary>
+            <p>
+              No. Flutter mobile keeps projects, assets and editing on the
+              device. AI requests go directly to your configured provider. Keep
+              the app open during local video export; background execution
+              depends on the operating system.
+            </p>
+          </details>
+          <details>
+            <summary>Where do my media and keys go?<span>+</span></summary>
+            <p>
+              Projects stay on your device by default. Necessary prompts and
+              references are sent to your selected provider for generation.
+              Device secure storage protects mobile API keys; keys are excluded
+              from project packages.
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <a class="logo" href="#"
+        ><span class="logo-mark">J</span
+        ><strong>Jingxu <small>STUDIO</small></strong></a
+      >
+      <p>Make every shot worth delivering.</p>
+      <div>
+        <a href="/en/privacy.html">Privacy</a
+        ><a href="/en/terms.html">Usage terms</a
+        ><span>© 2026 Jingxu Studio · Development preview</span>
+      </div>
+    </footer>
+    <dialog id="feedback-dialog">
+      <form method="dialog">
+        <button class="close-dialog" aria-label="Close">×</button>
+      </form>
+      <span class="eyebrow">BUILD SOMETHING WORTH PAYING FOR</span>
+      <h2>What would it help you finish?</h2>
+      <p>
+        This local questionnaire does not send or upload your information.
+        Download your answers to share with the product team yourself.
+      </p>
+      <form id="feedback-form">
+        <label
+          >Which device did you try?<select name="platform" required>
+            <option value="">Select a device</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="android">Android</option>
+            <option value="ios-simulator">iOS Simulator</option>
+            <option value="not-installed">I have not installed it</option>
+          </select></label
+        >
+        <label
+          >How far did you get?<select name="outcome" required>
+            <option value="">Select an outcome</option>
+            <option value="exported">Downloaded the MP4</option>
+            <option value="export-failed">
+              Opened the sample but export failed
+            </option>
+            <option value="opened-app">
+              Opened the app but have not exported
+            </option>
+            <option value="install-failed">
+              Had trouble downloading or installing
+            </option>
+            <option value="not-tried">Have not tried it</option>
+          </select></label
+        >
+        <label
+          >Where would you most like help?<select name="priority">
+            <option>Character and scene continuity, review and repair</option>
+            <option>Script breakdown and batch generation</option>
+            <option>Captions, voice and editing</option>
+            <option>Versions, review and delivery</option>
+          </select></label
+        ><label
+          >If it saved production time, would you try CNY 99/month?<select
+            name="willingness"
+            required
+          >
+            <option value="">Select an answer</option>
+            <option value="yes">Yes, after trying my own project</option>
+            <option value="undecided">
+              I need to see the time saved first
+            </option>
+            <option value="no">I am not ready to pay</option>
+            <option value="skip">Prefer not to answer</option>
+          </select></label
+        ><label
+          >What outcome matters to you?<textarea
+            name="expectation"
+            rows="3"
+            placeholder="For example: revise one shot without rebuilding an episode."
+          ></textarea></label
+        ><button class="button" type="submit">
+          Download my trial requirements ↓
+        </button>
+      </form>
+    </dialog>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
