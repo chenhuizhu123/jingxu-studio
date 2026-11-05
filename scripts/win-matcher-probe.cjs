@@ -1,51 +1,52 @@
-const { FileMatcher } = require("app-builder-lib/out/fileMatcher");
-const { Minimatch } = require("minimatch");
+const {
+  FileMatcher,
+  getMainFileMatchers,
+} = require("app-builder-lib/out/fileMatcher");
+const { AppFileWalker } = require("app-builder-lib/out/util/AppFileWalker");
 const path = require("path");
 const cwd = process.cwd();
-console.log("--- direct minimatch:");
-console.log(
-  "dist/** vs dist/desktop/main.cjs =",
-  new Minimatch("dist/**", { dot: true }).match("dist/desktop/main.cjs"),
-);
-console.log("--- FileMatcher filter:");
-const m = new FileMatcher(
+const destination = path.join(cwd, "release", "win-unpacked", "resources", "app");
+const files = ["dist/**", "package.json", "!dist/**/*.map"];
+const config = { files, includePdb: false };
+const packager = {
+  config,
+  projectDir: cwd,
+  buildResourcesDir: "build",
+  isPrepackedAppAsar: false,
+  debugLogger: { isEnabled: false, add() {} },
+  areNodeModulesHandledExternally: true,
+};
+const platformPackager = { info: packager, platform: "win32" };
+const matchers = getMainFileMatchers(
   cwd,
-  path.join(cwd, "release", "app"),
+  destination,
   (s) => s,
-  ["dist/**", "package.json", "!dist/**/*.map"],
+  { files },
+  platformPackager,
+  path.join(cwd, "release"),
+  false,
 );
-console.log("normalized patterns:", m.patterns);
-const filter = m.createFilter();
-const stat = { isDirectory: () => false };
-for (const rel of [
-  "dist/desktop/main.cjs",
-  "dist/server.mjs",
-  "dist/studio/index.html",
-  "package.json",
-]) {
-  console.log(rel, "=>", filter(path.join(cwd, rel), stat));
+for (const matcher of matchers) {
+  console.log("=== matcher from:", matcher.from);
+  console.log("patterns:", JSON.stringify(matcher.patterns, null, 2));
+  const walker = new AppFileWalker(matcher, packager);
+  const stat = { isDirectory: () => false };
+  for (const rel of [
+    "dist/desktop/main.cjs",
+    "dist/server.mjs",
+    "dist/studio/index.html",
+  ]) {
+    const f = path.join(cwd, rel);
+    console.log("file filter", rel, "=>", walker.filter(f, stat));
+  }
+  const dirstat = { isDirectory: () => true };
+  for (const rel of ["dist", "dist/desktop", "dist/runtime"]) {
+    const f = path.join(cwd, rel);
+    console.log(
+      "dir consume",
+      rel,
+      "=> returns(true=skip):",
+      walker.consume(f, dirstat),
+    );
+  }
 }
-console.log("--- dir partial matches:");
-const dirstat = { isDirectory: () => true };
-for (const rel of ["dist", "dist/desktop"]) {
-  console.log(rel, "=>", filter(path.join(cwd, rel), dirstat));
-}
-
-// Replicate production walk: builder-util walk + filter, same as appFileCopier
-(async () => {
-  const { walk } = await import("builder-util/out/fs.js");
-  const found = [];
-  await walk(
-    cwd,
-    (file, stat) => filter(file, stat),
-    {
-      consume: (file, stat) => {
-        if (file.includes(`${path.sep}dist${path.sep}`)) found.push(file);
-      },
-      isIncludeDir: false,
-    },
-  );
-  console.log("--- walked dist entries:", found.length);
-  console.log(found.slice(0, 8).join("\n"));
-})();
-
