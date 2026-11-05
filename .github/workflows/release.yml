@@ -64,8 +64,10 @@ jobs:
         shell: bash
         run: |
           echo "--- dist tree:"; find dist -maxdepth 2 -type f | head -20
-          echo "--- matcher debug for dist:"; node -e "const {FileMatcher}=require('app-builder-lib/out/fileMatcher');const m=new FileMatcher(['dist/**','package.json','!dist/**/*.map'], process.cwd(), process.cwd()+'/release/win-unpacked/resources/app');m.match().then(r=>console.log(r.filter(f=>f.includes('dist')).slice(0,10)))" 2>&1 | head -20
+          echo "--- raw glob dist/**:"; node -e "const g=require('glob');g.glob('dist/**',{cwd:process.cwd(),nodir:true,absolute:true}).then(r=>console.log(r.length, r.slice(0,3)))"
+          echo "--- FileMatcher:"; node -e "const {FileMatcher}=require('app-builder-lib/out/fileMatcher');const cwd=process.cwd();const m=new FileMatcher(cwd, cwd+'\\\\release\\\\win-unpacked\\\\resources\\\\app', s=>s, ['dist/**','package.json','!dist/**/*.map']);m.match().then(r=>{console.log('matched total:',r.length);console.log('dist hits:',r.filter(p=>p.includes('dist')).slice(0,8))})"
       - name: Inspect app.asar
+        if: always()
         shell: bash
         run: |
           node -e "const a=require('@electron/asar');const p='release/win-unpacked/resources/app.asar';const l=a.listPackage(p);console.log('entries:',l.length);console.log(l.slice(0,50).join('\n'));console.log('--- has /dist/desktop/main.cjs:',l.some(x=>x==='/dist/desktop/main.cjs'));console.log('--- backslash entries:');console.log(l.filter(x=>x.includes('\\\\')).slice(0,20).join('\n'));"
