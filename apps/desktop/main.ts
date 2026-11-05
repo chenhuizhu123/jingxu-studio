@@ -75,8 +75,8 @@ if (single)
       }
       const base = app.getAppPath();
       process.env.JINGXU_FONTS_DIR = join(base, "dist/runtime/fonts").replace(
-        "app.asar/",
-        "app.asar.unpacked/",
+        /app\.asar([/\\])/,
+        "app.asar.unpacked$1",
       );
       server = await startServer({
         root,

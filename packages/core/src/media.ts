@@ -51,7 +51,7 @@ export async function createDemoAsset(
 export function ffmpegPath() {
   const path = process.env.JINGXU_FFMPEG || ffmpegStatic;
   if (!path) throw new AppError(503, "未找到本机视频渲染器");
-  return path.replace("app.asar/", "app.asar.unpacked/");
+  return path.replace(/app\.asar([/\\])/g, "app.asar.unpacked$1");
 }
 export function runFfmpeg(args: string[], signal?: AbortSignal, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
