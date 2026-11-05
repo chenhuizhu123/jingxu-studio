@@ -56,18 +56,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
       - run: npm ci
-      - run: npm run build
-      - run: npx electron-builder --win --publish never
-        env:
-          DEBUG: electron-builder
-      - name: Check dist on disk
-        shell: bash
-        run: node scripts/win-matcher-probe.cjs
-      - name: Inspect app.asar
-        if: always()
-        shell: bash
-        run: |
-          node -e "const a=require('@electron/asar');const p='release/win-unpacked/resources/app.asar';const l=a.listPackage(p);console.log('entries:',l.length);console.log(l.slice(0,50).join('\n'));console.log('--- has /dist/desktop/main.cjs:',l.some(x=>x==='/dist/desktop/main.cjs'));console.log('--- backslash entries:');console.log(l.filter(x=>x.includes('\\\\')).slice(0,20).join('\n'));"
+      - run: npm run package:win
       - run: npm run test:package
       - run: npm run test:win:structure
       - uses: actions/upload-artifact@v4

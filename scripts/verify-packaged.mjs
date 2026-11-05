@@ -20,6 +20,9 @@ const resources = mac
 const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
 delete env.JINGXU_FFMPEG;
 const archive = join(resources, "app.asar");
+// @electron/asar resolves entries with the host path separator, so the
+// names passed to extractFile must use path.join on Windows too.
+const asarPath = (...parts) => join(...parts);
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
 assert.equal(
   JSON.parse(extractFile(archive, "package.json").toString()).version,
@@ -34,7 +37,7 @@ for (const file of [
   "dist/runtime/samples/jingxu-rain-sample-en.zip",
 ]) {
   assert.deepEqual(
-    extractFile(archive, file),
+    extractFile(archive, asarPath(...file.split("/"))),
     await readFile(resolve(file)),
     `Packaged build is stale: ${file}`,
   );
@@ -42,7 +45,7 @@ for (const file of [
 for (const file of await readdir(resolve("dist/studio/assets"))) {
   if (!file.endsWith(".map"))
     assert.deepEqual(
-      extractFile(archive, `dist/studio/assets/${file}`),
+      extractFile(archive, asarPath("dist", "studio", "assets", file)),
       await readFile(resolve("dist/studio/assets", file)),
       `Packaged studio asset is stale: ${file}`,
     );
@@ -56,7 +59,7 @@ const report = resolve(
 let output = "";
 const child = spawn(
   binary,
-  [join(resources, "app.asar/dist/runtime/package-smoke.cjs")],
+  [join(resources, "app.asar", "dist", "runtime", "package-smoke.cjs")],
   { stdio: ["ignore", "pipe", "inherit"], env },
 );
 child.stdout.on("data", (chunk) => {

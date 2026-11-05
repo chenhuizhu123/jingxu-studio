@@ -49,6 +49,8 @@ async function nativeFiles(root) {
 }
 export async function verifyWindowsPackage(directory, version) {
   const archive = join(directory, "resources/app.asar");
+  // @electron/asar resolves entries with the host path separator.
+  const asarPath = (name) => join(...name.split("/"));
   const entries = listPackage(archive).map((name) =>
     name.replaceAll("\\", "/").replace(/^\//, ""),
   );
@@ -62,7 +64,7 @@ export async function verifyWindowsPackage(directory, version) {
     "dist/runtime/samples/jingxu-rain-sample-en.zip",
   ]) {
     assert.deepEqual(
-      extractFile(archive, file),
+      extractFile(archive, asarPath(file)),
       await readFile(resolve(file)),
       `Stale packaged build: ${file}`,
     );
@@ -70,7 +72,7 @@ export async function verifyWindowsPackage(directory, version) {
   for (const file of await readdir(resolve("dist/studio/assets"))) {
     if (!file.endsWith(".map"))
       assert.deepEqual(
-        extractFile(archive, `dist/studio/assets/${file}`),
+        extractFile(archive, asarPath(`dist/studio/assets/${file}`)),
         await readFile(resolve("dist/studio/assets", file)),
         `Stale studio asset: ${file}`,
       );
@@ -100,7 +102,7 @@ export async function verifyWindowsPackage(directory, version) {
   );
   const notices = extractFile(
     archive,
-    "dist/runtime/THIRD_PARTY_NOTICES.txt",
+    asarPath("dist/runtime/THIRD_PARTY_NOTICES.txt"),
   ).toString();
   assert.ok(
     notices.includes("@img/sharp-win32-x64"),
