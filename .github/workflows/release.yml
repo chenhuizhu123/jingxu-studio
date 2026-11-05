@@ -56,7 +56,15 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
       - run: npm ci
-      - run: npm run package:win
+      - run: npm run build
+      - run: npx electron-builder --win --publish never
+        env:
+          DEBUG: electron-builder
+      - name: Check dist on disk
+        shell: bash
+        run: |
+          echo "--- dist tree:"; find dist -maxdepth 2 -type f | head -20
+          echo "--- matcher debug for dist:"; node -e "const {FileMatcher}=require('app-builder-lib/out/fileMatcher');const m=new FileMatcher(['dist/**','package.json','!dist/**/*.map'], process.cwd(), process.cwd()+'/release/win-unpacked/resources/app');m.match().then(r=>console.log(r.filter(f=>f.includes('dist')).slice(0,10)))" 2>&1 | head -20
       - name: Inspect app.asar
         shell: bash
         run: |
