@@ -1,5 +1,11 @@
 export const en: Record<string, string> = {
   开发预览: "Development preview",
+  成片准备: "Ready to render",
+  镜头素材和字幕已就绪: "shots have media and current captions",
+  "先在分镜工作台添加镜头，再选择图片或视频。":
+    "Add shots to the storyboard, then select an image or video for each shot.",
+  打开分镜工作台: "Open storyboard",
+  选择一张图片或一段视频: "Select an image or video",
   导入项目包: "Import project",
   "将项目包恢复为独立项目，保留已有项目与候选版本。":
     "Restore a separate project while keeping your existing projects and takes.",
@@ -174,6 +180,14 @@ export const en: Record<string, string> = {
   批量生成: "Generate batch",
   "把不满意，变成下一次更好。": "Give every revision a clear direction.",
   把你的素材带进来: "Bring your assets into the story",
+  全部素材: "All assets",
+  图片: "Images",
+  视频: "Videos",
+  音频: "Audio",
+  文档: "Docs",
+  该分类还没有素材: "No assets in this category yet",
+  "切换到其他分类查看，或导入新的素材。":
+    "Switch to another category, or import new assets.",
   "把创作标准和工作习惯写成 Skills，交给导演助手按需使用。":
     "Turn your creative standards into Skills your assistant can use when needed.",
   "把故事，拍成镜头": "Bring your story into focus",
@@ -217,6 +231,10 @@ export const en: Record<string, string> = {
   查看创作规则: "View creative rules",
   查看配对信息: "View pairing information",
   "标识 / 英文小写与连字符": "ID / lowercase letters and hyphens",
+  名称: "Name",
+  "如：品牌视频审查": "e.g. Brand video review",
+  "仅用作内部标识，界面会显示上面的名称。":
+    "Internal ID only; the Name above is what shows in the app.",
   检查: "Check",
   "模型 ID": "Model ID",
   模型名称: "Model name",
@@ -295,6 +313,19 @@ export const en: Record<string, string> = {
   连接工作站: "Connect workspace",
   连接手机与工作站: "Connect a workspace",
   "选择 Skill": "Choose a Skill",
+  "不指定 · 通用导演助手": "None · general director assistant",
+  "不套用特定创作规则，由通用导演助手通读项目后给建议。":
+    "No specific playbook is applied; the general director assistant reads the project and advises.",
+  "用这个 Skill 询问导演助手": "Ask the director with this Skill",
+  "请先打开或新建一个作品，再让导演助手使用该 Skill。":
+    "Open or create a project first, then ask the director to use this Skill.",
+  还没有配置导演助手模型: "Director assistant model not configured yet",
+  "导演助手使用你自带的对话模型（与视频生成服务分开配置）。填好服务地址、模型 ID 和 API Key 后即可开始对话。":
+    "The director assistant uses your own chat model, configured separately from the video service. Add the endpoint, model ID and API key to start chatting.",
+  去配置模型: "Configure model",
+  "未配置模型 · 点上方按钮前往设置":
+    "No model configured · tap the button above to open Settings",
+  请先配置导演助手模型: "Configure the director assistant model first",
   选用: "Select",
   选用项目素材: "Use project media",
   配对令牌: "Pairing token",
@@ -318,6 +349,8 @@ export const en: Record<string, string> = {
   镜序: "Jingxu",
   "镜序 Studio 0.1.0 · 开发预览": "Jingxu Studio 0.1.0 · Development preview",
   队列很安静: "The queue is clear",
+  进行中的任务: "Active jobs",
+  历史任务: "Job history",
   需返修: "Needs changes",
   音乐音量: "Music volume",
   项待查看: "items to review",
@@ -470,6 +503,32 @@ export const en: Record<string, string> = {
     "Local tracking stopped. The remote task may continue; check your provider.",
   "成片已导出，可在交付中心下载 MP4 与字幕":
     "Video rendered. Download the MP4 and subtitles in Export.",
+  免费预演: "Free animatic",
+  "本地 · 0 模型费用": "Local · 0 model cost",
+  "正式生成前，先用每个镜头已选的图片或参考图，按时长串成一条带字幕的预演片；还没有素材的镜头会用占位卡代替。不调用任何模型，纯本地合成，用来先判断整场戏的节奏与连贯，再决定把钱花在哪些镜头。":
+    "Before paying for generation, stitch each shot's selected image or reference into a timed, subtitled animatic using placeholders where assets don't exist yet. It calls no model and runs fully on-device, so you can check whole-scene pacing and continuity before deciding which shots are worth the spend.",
+  生成免费预演片: "Build free animatic",
+  正在预演: "Building animatic",
+  "开始合成免费预演片，可在任务队列查看进度":
+    "Building the free animatic. Track progress in the job queue.",
+  预演: "Animatic",
+  "免费预演片已生成，可在交付中心预览节奏与连贯度":
+    "Free animatic ready. Review pacing and continuity in Export.",
+  本批生成后将超出月度预算:
+    "This batch would push you over your monthly budget",
+  本月估算支出已超出月度预算:
+    "Estimated monthly spend is already over your budget",
+  本批生成后将接近月度预算:
+    "This batch would bring you close to your monthly budget",
+  本月估算支出已接近月度预算:
+    "Estimated monthly spend is already close to your budget",
+  本批后估算支出: "Estimated spend after this batch",
+  本月已用估算: "Estimated spent this month",
+  月度预算: "Monthly budget",
+  超出约: "About over by",
+  剩余约: "About remaining",
+  "预算仅在本地提醒，不会阻止生成。":
+    "This is a local reminder only; it never blocks generation.",
   "执行已暂停，启动后恢复": "Execution paused. It will recover on restart.",
   "已恢复，继续查询远程任务": "Recovered. Resuming remote status checks.",
   "已恢复，等待继续执行": "Recovered. Waiting to resume.",
@@ -812,4 +871,179 @@ export const en: Record<string, string> = {
     "A previously restored episode was deleted. Select the package again to restore it.",
   "无法保存整季工程，请检查磁盘空间和写入权限":
     "Could not save the series. Check available disk space and write permissions.",
+  专业版: "Pro",
+  "专业版 · 永久": "Pro · Lifetime",
+  "还未开始试用：开始 14 天试用或激活许可证后即可使用生成功能。":
+    "Your trial has not started. Start the 14-day trial or activate a license to use generation.",
+  "试用或许可已到期：激活后可继续生成，本机作品仍可查看与导出。":
+    "Your trial or license has ended. Activate to keep generating; work on this computer stays viewable and exportable.",
+  试用还剩: "Trial time left:",
+  "天，到期后可激活许可证继续使用。":
+    "day(s). Activate a license afterwards to keep using it.",
+  立即激活: "Activate now",
+  查看许可: "View license",
+  许可与试用: "License & trial",
+  "新用户享有 14 天本机试用；激活许可证后持续使用。作品与凭据始终保存在你的工作站。":
+    "Every new workspace gets a 14-day local trial. Activate a license to keep using it. Your work and credentials always stay on your workstation.",
+  已激活: "Active",
+  试用中: "On trial",
+  已到期: "Expired",
+  未开始: "Not started",
+  许可证类型: "License plan",
+  绑定邮箱: "Licensed email",
+  有效期限: "Valid until",
+  剩余: "time left",
+  天: "days",
+  永久有效: "Lifetime",
+  设备绑定: "Device binding",
+  已绑定本机: "Bound to this computer",
+  未限制设备: "Not device-locked",
+  "解绑后本机生成功能将停用，确认解绑？":
+    "Generation on this computer stops after unlinking. Unlink anyway?",
+  确认解绑: "Confirm unlink",
+  在本机解绑许可证: "Unlink license on this computer",
+  试用截止: "Trial ends",
+  "当前许可证无法通过校验，请重新输入许可证。":
+    "The current license failed verification. Enter a license again.",
+  "服务期已结束，激活新许可证后继续使用生成功能。":
+    "Your service period has ended. Activate a new license to keep generating.",
+  "许可证密钥（JX1-…）": "License key (JX1-…)",
+  购买后粘贴许可证密钥: "Paste the license key you received after purchase",
+  激活许可证: "Activate license",
+  开始14天免费试用: "Start the free 14-day trial",
+  "开始 14 天免费试用": "Start the free 14-day trial",
+  许可证已激活: "License activated",
+  许可证已解绑: "License unlinked",
+  "14 天试用已开始": "Your 14-day trial has started",
+  "把灵感，做成可交付的成片": "Turn ideas into deliverable episodes",
+  "本地优先的短剧制作工作台：剧本拆镜、角色与场景参考、图片 / 配音 / 字幕、视频生成与成片导出，全部在你的工作站完成。":
+    "A local-first short-drama studio: script-to-storyboard, cast and scene references, images, voiceover, captions, video generation and final export — all on your workstation.",
+  作品留在本机: "Your work stays local",
+  "项目、素材与凭据默认不出本机":
+    "Projects, media and credentials leave this computer only if you say so",
+  生成服务自由选择: "Pick your own generation services",
+  "自带 API Key，也可先用演示素材走通流程":
+    "Bring your own API keys, or walk through the flow with demo assets first",
+  "14 天完整功能试用": "14 days of full-feature trial",
+  "到期后可用许可证续期，作品始终可查看与导出":
+    "Renew with a license afterwards; your work always stays viewable and exportable",
+  我已有许可证: "I already have a license",
+  "开始试用即表示同意服务条款与隐私政策；试用期不会自动扣费。":
+    "Starting the trial implies acceptance of the Terms and Privacy Policy. You will not be charged automatically during the trial.",
+  "请先开始 14 天试用或激活许可证":
+    "Start the 14-day trial or activate a license first",
+  "14 天试用已结束，激活许可证后可继续生成；本机作品仍可查看与导出":
+    "The 14-day trial has ended. Activate a license to keep generating; work on this computer remains viewable and exportable",
+  "当前许可证无法通过校验，请重新激活或联系支持":
+    "The current license failed verification. Reactivate it or contact support",
+  "许可证已到期，请续期后继续使用":
+    "Your license has expired. Renew it to continue",
+  授权与试用: "License & trial",
+  "新用户享有 14 天本机试用；购买后用授权码在本机激活。作品与凭据始终保存在你的工作站。":
+    "Every new workspace gets a 14-day local trial. After purchase, activate your license key on this computer. Your work and credentials always stay on your workstation.",
+  授权码: "License key",
+  本机设备: "This device",
+  设备名额: "Device seats",
+  不限设备: "Unlimited devices",
+  最近校验: "Last checked",
+  离线宽限中: "offline grace period",
+  立即校验: "Check now",
+  授权已重新校验: "License rechecked",
+  "解绑会释放本机设备名额，解绑后生成功能将停用，确认解绑？":
+    "Unlinking releases this device seat and stops generation here. Unlink anyway?",
+  解绑本机设备: "Unlink this device",
+  设备已解绑: "Device unlinked",
+  "服务期已结束，购买并激活授权后继续使用生成功能。":
+    "Your service period has ended. Buy and activate a license to keep generating.",
+  "授权码（XXXXX-XXXXX-XXXXX-XXXXX-XXXXX）":
+    "License key (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)",
+  购买后粘贴授权码: "Paste the license key you received after purchase",
+  激活授权: "Activate license",
+  购买镜序桌面版: "Buy Jingxu Studio",
+  授权已在本机激活: "License activated on this computer",
+  "已打开安全结账页，支付后授权码会出现在确认页并发送到邮箱":
+    "Secure checkout opened. After payment the key appears on the confirmation page and is emailed to you",
+  "在线结账即将开通；拿到授权码后可直接在此激活。":
+    "Online checkout is coming soon. You can already activate a license key here.",
+  授权邮箱: "License email",
+  授权套餐: "Plan",
+  激活时间: "Activated",
+  解除本机授权: "Remove license from this computer",
+  "解绑后生成功能将停用，确认解除本机授权？":
+    "Generation will stop on this computer. Remove the license anyway?",
+  "本项目 AI 用量": "AI usage for this project",
+  "按成功任务统计你自己的模型服务调用量；费用由服务商直接收取，镜序可按你填写的单价估算成本。":
+    "Counts successful calls to your own model providers. Providers charge you directly; Jingxu can estimate the cost from unit prices you enter.",
+  视频生成: "Video generation",
+  配音合成: "Voice synthesis",
+  语音识别: "Speech recognition",
+  秒: "sec",
+  张: "images",
+  字: "chars",
+  次成功任务: "successful jobs",
+  "还没有成功的在线生成任务。本地渲染不计入。":
+    "No successful online generation jobs yet. Local renders are not counted.",
+  设置单价: "Set unit prices",
+  收起单价设置: "Hide unit prices",
+  保存单价: "Save prices",
+  单价已保存: "Unit prices saved",
+  "月度预算必须是不小于 0 的数字":
+    "Monthly budget must be a number no less than 0",
+  "月度预算（可选，仅本地提醒）": "Monthly budget (optional, local alert only)",
+  本月预算: "Monthly budget",
+  已用: "Used",
+  剩余预算: "remaining",
+  已超出: "Over by",
+  本月预算使用比例: "Share of monthly budget used",
+  "本月估算成本已超过预算。仅本地提醒，不会阻止生成，实际以服务商账单为准。":
+    "Estimated cost this month is over budget. This is a local alert only and never blocks generation; your provider bill is authoritative.",
+  "本月预算已用超过 80%，留意后续生成花费；实际以服务商账单为准。":
+    "Over 80% of the monthly budget is used — keep an eye on further generation spend; your provider bill is authoritative.",
+  "按你填写的单价估算，仅本地提醒，不会阻止生成。":
+    "Estimated from the unit prices you entered. Local alert only; generation is never blocked.",
+  货币符号: "Currency symbol",
+  估算合计: "Estimated total",
+  "视频 · 每秒": "Video · per second",
+  "图片 · 每张": "Image · per image",
+  "配音 · 每千字符": "Voice · per 1k chars",
+  "识别 · 每秒": "Transcription · per second",
+  "填入服务商账单上的单价，可在本地估算本项目模型成本。":
+    "Enter the unit prices from your provider bill to estimate this project's model cost locally.",
+  "按你填写的服务商单价估算，仅用于与服务商账单对账，不是镜序收费。":
+    "Estimated from the unit prices you entered, for reconciling with your provider bill only. This is not a Jingxu charge.",
+  用量与成本总览: "Usage & cost overview",
+  "按时间范围汇总所有项目的成功任务，按你填写的单价估算，可导出 CSV 与服务商或客户对账。":
+    "Aggregates successful jobs across all projects for the selected period, estimates cost from the unit prices you entered, and exports CSV for reconciling with providers or clients.",
+  本月: "This month",
+  "近 30 天": "Last 30 days",
+  全部: "All time",
+  "没有符合时间范围的成功任务。": "No successful jobs in the selected period.",
+  项目: "Project",
+  成功任务: "Successful jobs",
+  估算成本: "Estimated cost",
+  合计: "TOTAL",
+  "导出 CSV": "Export CSV",
+  "成本按你填写的服务商单价估算，仅用于与服务商账单对账，不是镜序收费。":
+    "Costs are estimated from the provider prices you enter, for reconciling provider bills only; this is not a Jingxu charge.",
+  "单价必须是不小于 0 的数字": "Unit prices must be numbers of 0 or greater",
+  生成前确认: "Confirm before generating",
+  "所有镜头都已有选定候选，本次将为全部镜头重新生成视频候选。":
+    "Every shot already has a selected candidate; this will regenerate video candidates for all shots.",
+  "将为尚未确认的镜头生成视频候选，已确认镜头不受影响。":
+    "Video candidates will be generated for shots without a selection; approved shots stay untouched.",
+  镜头数量: "Shots",
+  个: "",
+  预计总时长: "Estimated duration",
+  "演示模式 · 不消耗额度，可放心试用。":
+    "Demo mode · no credits are used, try it freely.",
+  预计视频成本: "Estimated video cost",
+  "按镜头时长与你填写的每秒单价估算，仅含首轮候选；重做或生成多版会再次计费，实际以服务商账单为准。":
+    "Estimated from shot durations and your per-second price, first-round candidates only; retakes or extra versions are billed again. Your provider bill is authoritative.",
+  "尚未设置视频每秒单价，无法预估金额。可先到「任务队列 · 用量与成本总览」填写单价，也可以直接继续。":
+    "No video per-second price is set yet, so the cost cannot be estimated. Set it in Task queue · Usage & cost overview, or continue anyway.",
+  确认加入队列: "Add to queue",
+  "按你填写的每秒单价估算，实际以服务商账单为准。":
+    "Estimated from your per-second price; your provider bill is authoritative.",
+  预计成本: "Estimated cost",
+  "，以服务商账单为准。": "; your provider bill is authoritative.",
 };

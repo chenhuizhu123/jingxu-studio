@@ -357,6 +357,7 @@ describe("BYOK speech-compatible voiceover", () => {
         seed: false,
         startQueue: false,
       });
+    engine.license.startTrial();
     try {
       const req = (path: string, method: string, body: any) =>
         fetch(`http://127.0.0.1:${engine.port}/api${path}`, {

@@ -81,6 +81,7 @@ beforeEach(async () => {
   );
   endpoint = `http://127.0.0.1:${(provider.address() as { port: number }).port}/api/v3`;
   app = await startServer({ root, port: 0, seed: false, startQueue: false });
+  app.license.startTrial();
   const settings = structuredClone(defaultSettings);
   settings.image = {
     endpoint,

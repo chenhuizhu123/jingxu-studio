@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import PQueue from "p-queue";
 import {
   transcribeShot,
   transcriptionAsset,
@@ -34,7 +35,8 @@ import {
   referenceIds,
 } from "../../shared/shot-references";
 import type { Store } from "./store";
-import { createDemoAsset, renderVideo } from "./media";
+import { episodeBlockers } from "../../shared/episode-status";
+import { createDemoAsset, renderVideo, renderAnimatic } from "./media";
 import {
   downloadVideo,
   generationState,
@@ -42,14 +44,19 @@ import {
   redactError,
   submitGeneration,
 } from "./providers";
+import type { LicenseGate } from "./license";
 
 export class JobQueue {
   private active = new Map<string, AbortController>();
-  private timer?: ReturnType<typeof setInterval>;
+  private queue?: PQueue;
+  private admitted = new Set<string>();
   private stopped = false;
-  constructor(private store: Store) {}
+  constructor(
+    private store: Store,
+    private license?: LicenseGate,
+  ) {}
   start() {
-    if (this.timer) return;
+    if (this.queue) return;
     recoverSpeechFiles(this.store);
     recoverTranscriptionFiles(this.store);
     recoverGeneratedImages(this.store);
@@ -70,8 +77,41 @@ export class JobQueue {
             : "已恢复，等待继续执行",
         });
     }
-    this.timer = setInterval(() => void this.tick(), 250);
-    void this.tick();
+    this.queue = new PQueue({ concurrency: this.store.settings().concurrency });
+    this.admit();
+  }
+  // Move persisted queued jobs into p-queue. Jobs are admitted newest-first to
+  // preserve the previous scheduler's ordering; admission is idempotent.
+  private admit() {
+    const queue = this.queue;
+    if (!queue || this.stopped) return;
+    queue.concurrency = this.store.settings().concurrency;
+    for (const j of this.store
+      .jobs()
+      .filter((j) => j.state === "queued")
+      .reverse()) {
+      if (this.admitted.has(j.id)) continue;
+      this.admitted.add(j.id);
+      void queue.add(() => this.execute(j.id));
+    }
+  }
+  refreshConcurrency() {
+    if (this.queue && !this.stopped)
+      this.queue.concurrency = this.store.settings().concurrency;
+  }
+  private async execute(jobId: string) {
+    try {
+      const job = this.store.get<Job>("job", jobId);
+      // A queued job can be cancelled while waiting for a free slot.
+      if (!job || job.state !== "queued") return;
+      const controller = new AbortController();
+      this.active.set(jobId, controller);
+      await this.run(job, controller.signal);
+    } finally {
+      this.active.delete(jobId);
+      this.admitted.delete(jobId);
+      this.admit();
+    }
   }
   private save(job: Job) {
     job.updatedAt = now();
@@ -92,9 +132,42 @@ export class JobQueue {
     if (type === "transcribe")
       return this.enqueueTranscription(projectId, shotId!);
     if (type === "speech") return this.enqueueSpeech(projectId, shotId!);
+    if (type === "animatic") {
+      const ap = this.store.project(projectId);
+      if (!ap.shots.length) throw new AppError(400, "请先添加分镜");
+      if (
+        this.store
+          .jobs()
+          .some(
+            (j) =>
+              j.projectId === projectId &&
+              (j.type === "animatic" || j.type === "export") &&
+              ["queued", "running"].includes(j.state),
+          )
+      )
+        throw new AppError(409, "已有渲染任务，请等待完成");
+      const animaticJob: Job = {
+        id: id(),
+        projectId,
+        type,
+        state: "queued",
+        progress: 0,
+        message: "等待预演",
+        createdAt: now(),
+        updatedAt: now(),
+        provider: "local",
+        attempts: 0,
+        exportRevision: ap.revision,
+      };
+      this.store.put("snapshot", animaticJob.id, ap);
+      const saved = this.save(animaticJob);
+      this.admit();
+      return saved;
+    }
     const p = this.store.project(projectId),
       settings = this.store.settings();
     if (type === "generate") {
+      this.license?.assertActive();
       if (!shotId) throw new AppError(400, "缺少镜头");
       const s = getShot(p, shotId);
       if (firstFrame) {
@@ -157,10 +230,14 @@ export class JobQueue {
         apiKey: this.store.encrypt(settings.generation.apiKey),
       });
       this.save(job);
+      this.admit();
       return job;
     }
-    if (!p.shots.length || p.shots.some((s) => !s.selectedVersionId))
+    const blockers = episodeBlockers(p);
+    if (!p.shots.length || blockers.some((b) => b.missingMedia))
       throw new AppError(400, "请为每个镜头选择素材后再渲染");
+    if (blockers.some((b) => b.staleCaptions))
+      throw new AppError(409, "音轨或剪辑已改变，请重新核对字幕");
     if (
       this.store
         .jobs()
@@ -186,7 +263,9 @@ export class JobQueue {
       exportRevision: p.revision,
     };
     this.store.put("snapshot", job.id, p);
-    return this.save(job);
+    const exported = this.save(job);
+    this.admit();
+    return exported;
   }
   enqueueImage(
     projectId: string,
@@ -194,6 +273,7 @@ export class JobQueue {
     revision: number,
     destination: Pick<Settings["image"], "endpoint" | "model">,
   ) {
+    this.license?.assertActive();
     const project = this.store.project(projectId),
       shot = getShot(project, shotId);
     const config = this.store.settings().image;
@@ -240,9 +320,12 @@ export class JobQueue {
       ...config,
       apiKey: this.store.encrypt(config.apiKey),
     });
-    return this.save(job);
+    const imageJob = this.save(job);
+    this.admit();
+    return imageJob;
   }
   enqueueSpeech(projectId: string, shotId: string, expectedText?: string) {
+    this.license?.assertActive();
     const p = this.store.project(projectId),
       shot = getShot(p, shotId),
       config = this.store.settings().speech;
@@ -283,13 +366,16 @@ export class JobQueue {
       ...config,
       apiKey: this.store.encrypt(config.apiKey),
     });
-    return this.save(job);
+    const speechJob = this.save(job);
+    this.admit();
+    return speechJob;
   }
   enqueueTranscription(
     projectId: string,
     shotId: string,
     expected?: CaptionSource,
   ) {
+    this.license?.assertActive();
     const p = this.store.project(projectId),
       shot = getShot(p, shotId),
       config = this.store.settings().transcription;
@@ -321,13 +407,16 @@ export class JobQueue {
       createdAt: now(),
       updatedAt: now(),
       attempts: 0,
+      usage: { seconds: source.duration },
     };
     this.store.put("snapshot", job.id, p);
     this.store.put("asr-config", job.id, {
       ...config,
       apiKey: this.store.encrypt(config.apiKey),
     });
-    return this.save(job);
+    const saved = this.save(job);
+    this.admit();
+    return saved;
   }
   cancel(jobId: string) {
     const j = this.store.get<Job>("job", jobId);
@@ -359,22 +448,6 @@ export class JobQueue {
         "请回到镜头重新确认生成内容，提交前核对服务商记录",
       );
     return this.enqueue(j.projectId, j.type, j.shotId);
-  }
-  async tick() {
-    if (this.stopped) return;
-    const capacity = this.store.settings().concurrency - this.active.size;
-    for (const j of this.store
-      .jobs()
-      .filter((j) => j.state === "queued")
-      .reverse()
-      .slice(0, Math.max(0, capacity))) {
-      if (this.active.has(j.id)) continue;
-      const controller = new AbortController();
-      this.active.set(j.id, controller);
-      void this.run(j, controller.signal).finally(() =>
-        this.active.delete(j.id),
-      );
-    }
   }
   private async run(job: Job, signal: AbortSignal) {
     const settings = this.store.settings();
@@ -409,7 +482,10 @@ export class JobQueue {
         ...job,
         state: "running",
         attempts: job.attempts + 1,
-        message: job.type === "export" ? "正在合成镜头" : "正在准备镜头",
+        message:
+          job.type === "export" || job.type === "animatic"
+            ? "正在合成镜头"
+            : "正在准备镜头",
         progress: 5,
       });
       if (job.type === "image") {
@@ -546,13 +622,14 @@ export class JobQueue {
         });
         return;
       }
-      if (job.type === "export") {
+      if (job.type === "export" || job.type === "animatic") {
         const snapshot = this.store.get<ReturnType<Store["project"]>>(
           "snapshot",
           job.id,
         );
         if (!snapshot) throw new AppError(500, "缺少导出快照");
-        const result = await renderVideo(
+        const isAnimatic = job.type === "animatic";
+        const result = await (isAnimatic ? renderAnimatic : renderVideo)(
           this.store,
           snapshot,
           (n) => {
@@ -571,7 +648,9 @@ export class JobQueue {
           ...this.current(job.id),
           state: "succeeded",
           progress: 100,
-          message: "成片已导出，可在交付中心下载 MP4 与字幕",
+          message: isAnimatic
+            ? "免费预演片已生成，可在交付中心预览节奏与连贯度"
+            : "成片已导出，可在交付中心下载 MP4 与字幕",
           resultId: result.id,
         });
         return;
@@ -731,7 +810,9 @@ export class JobQueue {
   }
   async close() {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    // Pending tasks must not start after shutdown; they stay "queued" in the
+    // store and are recovered on the next launch.
+    this.queue?.clear();
     for (const c of this.active.values()) c.abort();
     const end = Date.now() + 5000;
     while (this.active.size && Date.now() < end) await delay(25);

@@ -66,6 +66,27 @@ describe("项目与分镜", () => {
     });
     expect(buildStoryboard(p)).toHaveLength(60);
   });
+  it("英文分镜提示词使用英文风格描述且不含中文枚举，中文保持原样", () => {
+    const en = createProject({
+      name: "EN",
+      script: "A-Lin walks to the window.",
+      style: "电影写实",
+    });
+    buildStoryboard(en, "en");
+    const enPrompt = en.shots[0].prompt;
+    expect(enPrompt).toContain("cinematic realism");
+    expect(enPrompt).toContain("9:16 aspect ratio");
+    expect(enPrompt).not.toContain("电影写实");
+
+    const zh = createProject({
+      name: "中",
+      script: "阿青走到窗边。",
+      style: "电影写实",
+    });
+    buildStoryboard(zh, "zh");
+    expect(zh.shots[0].prompt).toContain("电影写实");
+    expect(zh.shots[0].prompt).toContain("9:16画幅");
+  });
   it("未知镜头不能修改", () => {
     expect(() => updateShot(fixture(), "bad", { title: "A" })).toThrow(
       "镜头不存在",

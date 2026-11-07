@@ -40,6 +40,8 @@ beforeEach(async () => {
     seed: false,
     startQueue: false,
   });
+  source.license.startTrial();
+  destination.license.startTrial();
   seriesId = id();
   episodes = await Promise.all(
     [2, 7].map(async (number) => {

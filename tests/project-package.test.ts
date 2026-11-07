@@ -282,7 +282,9 @@ describe("Portable project archives using yazl and yauzl", () => {
   it("rolls back media publication when the database commit fails", async () => {
     const p = await setup(),
       file = await fixture(p);
-    vi.spyOn(store!, "put").mockImplementationOnce(() => {
+    // Import commits through writeBatch(insertOnly); a failed commit must
+    // roll back the staged media directory.
+    vi.spyOn(store!, "writeBatch").mockImplementationOnce(() => {
       throw new Error("disk full");
     });
     await expect(importProjectPackage(store!, file)).rejects.toThrow();

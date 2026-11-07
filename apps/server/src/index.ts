@@ -9,6 +9,12 @@ const instance = await startServer({
   allowedOrigins: (process.env.JINGXU_ALLOWED_ORIGINS ?? "")
     .split(",")
     .filter(Boolean),
+  billing: process.env.JINGXU_BILLING_API_URL
+    ? {
+        url: process.env.JINGXU_BILLING_API_URL,
+        enforce: process.env.JINGXU_BILLING_ENFORCE === "1",
+      }
+    : undefined,
 });
 process.stdout.write(`镜序 Studio API: http://127.0.0.1:${instance.port}\n`);
 for (const sig of ["SIGINT", "SIGTERM"] as const)

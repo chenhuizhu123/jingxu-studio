@@ -62,6 +62,49 @@ export async function api<T = any>(
 }
 export const post = <T = any>(path: string, data: unknown = {}) =>
   api<T>(path, { method: "POST", body: JSON.stringify(data) });
+
+export type CreemLicense = {
+  maskedKey: string;
+  status: "active" | "inactive" | "expired" | "disabled";
+  instanceId: string;
+  instanceName: string;
+  expiresAt: string | null;
+  activationLimit: number | null;
+  activation: number | null;
+  validatedAt: string | null;
+  offline: boolean;
+};
+export type LicenseView = {
+  configured: boolean;
+  enforce: boolean;
+  license: CreemLicense | null;
+};
+export type LicenseState = {
+  blocked: boolean;
+  status: "none" | "trial" | "active" | "expired";
+  machineId: string;
+  daysLeft?: number;
+  reason?: string;
+  trial?: { startedAt: string; endsAt: string; daysLeft: number };
+  license?: {
+    email: string;
+    plan: string;
+    until?: string;
+    machineBound: boolean;
+    activatedAt: string;
+  };
+  creem: LicenseView;
+};
+export const getLicense = () => api<LicenseState>("/license");
+export const startTrial = () => post<LicenseState>("/license/trial");
+export const checkoutLicense = () =>
+  post<{ checkoutUrl: string }>("/license/checkout");
+export const activateLicense = (key: string) =>
+  post<LicenseState>("/license/activate", { key });
+export const validateLicense = () => post<LicenseState>("/license/validate");
+export const deactivateLicense = () =>
+  post<LicenseState>("/license/deactivate");
+
 export async function saveText(
   name: string,
   text: string,
@@ -78,7 +121,11 @@ export async function saveBlob(name: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 export async function download(url: string, name: string) {
-  const r = await fetch(mediaUrl(url));
+  const href = mediaUrl(url);
+  const r = await fetch(href, { method: "HEAD" });
   if (!r.ok) throw new Error(t("下载链接已过期，请刷新后重试"));
-  await saveBlob(name, await r.blob());
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = name;
+  link.click();
 }

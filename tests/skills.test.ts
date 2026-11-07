@@ -84,6 +84,20 @@ describe("Open-source skill compatibility", () => {
     ]);
     expect((globalThis as any).__skillExecuted).toBeUndefined();
   });
+  it("uses optional title as the display name while the file slug stays the id", async () => {
+    const { builtin } = await setup();
+    await writeFile(
+      join(builtin, "brand-video-review.md"),
+      matter.stringify("Read the brand guide first.", {
+        name: "brand-video-review",
+        title: "品牌视频审查",
+        description: "逐镜检查品牌外观",
+      }),
+    );
+    const [skill] = await readSkills(store!, builtin);
+    expect(skill.id).toBe("brand-video-review");
+    expect(skill.name).toBe("品牌视频审查");
+  });
   it("allows an explicitly saved custom skill to override the bundled copy", async () => {
     const { builtin, custom } = await setup();
     for (const [root, name] of [

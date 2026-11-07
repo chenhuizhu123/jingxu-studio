@@ -45,6 +45,7 @@ beforeAll(async () => {
     startQueue: false,
   });
   base = `http://127.0.0.1:${instance.port}`;
+  instance.license.startTrial();
 });
 afterAll(async () => {
   await instance.close();
@@ -71,6 +72,31 @@ describe.sequential("工作站 API", () => {
     } finally {
       await recovered.close();
       await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("点目录数据根下素材链接仍可下载（dotfiles 回归）", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "jingxu-dot-"));
+    const root = join(parent, ".data");
+    const dot = await startServer({
+      root,
+      port: 0,
+      seed: true,
+      startQueue: false,
+    });
+    try {
+      const projects = await (
+        await fetch(`http://127.0.0.1:${dot.port}/api/projects`, {
+          headers: { Authorization: `Bearer ${dot.token}` },
+        })
+      ).json();
+      const asset = projects[0].assets[0];
+      const r = await fetch(`http://127.0.0.1:${dot.port}${asset.url}`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get("content-type")).toContain("image/png");
+      expect((await r.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    } finally {
+      await dot.close();
+      await rm(parent, { recursive: true, force: true });
     }
   });
   it("健康检查与本机配对可用", async () => {
@@ -292,11 +318,18 @@ describe.sequential("工作站 API", () => {
       (
         await request("/skills", "POST", {
           name: "my-brand",
+          title: "品牌视频审查",
           description: "品牌规范",
           content: "先读取产品外观，保持标签一致。",
         })
       ).status,
     ).toBe(201);
+    const saved = (await request("/skills")).data.find(
+      (s: any) => s.id === "my-brand",
+    );
+    expect(saved).toBeTruthy();
+    // 文件名 slug 作为稳定 id，界面显示可读名称（frontmatter name）。
+    expect(saved.name).toBe("品牌视频审查");
     expect(
       (await request("/skills")).data.some((s: any) => s.id === "my-brand"),
     ).toBe(true);
@@ -374,3 +407,194 @@ describe.sequential("工作站 API", () => {
     expect(r.data.shots[0].versions).toHaveLength(1);
   });
 });
+
+describe("许可与试用门控", () => {
+  let gated: Awaited<ReturnType<typeof startServer>>;
+  let url = "";
+  beforeAll(async () => {
+    gated = await startServer({
+      root: await mkdtemp(join(tmpdir(), "jingxu-license-api-")),
+      port: 0,
+      seed: true,
+      startQueue: false,
+    });
+    url = `http://127.0.0.1:${gated.port}`;
+  });
+  afterAll(async () => {
+    const root = gated.store.root;
+    await gated.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const call = (path: string, method = "GET", body?: unknown) =>
+    requestAt(url, gated.token, path, method, body);
+
+  it("未开始试用时生成任务返回 402，渲染导出不受门控", async () => {
+    expect((await call("/license")).data.status).toBe("none");
+    const projects = await call("/projects");
+    const p = projects.data[0];
+    const generate = await call(`/projects/${p.id}/generate`, "POST", {
+      shotIds: [p.shots[0].id],
+    });
+    expect(generate.status).toBe(402);
+    // 导出不经过许可门控：样片缺素材会得到业务校验错误，而不是 402
+    const render = await call(`/projects/${p.id}/render`, "POST", {});
+    expect(render.status).not.toBe(402);
+  });
+  it("开始试用后可生成，非法许可证被拒绝", async () => {
+    const trial = await call("/license/trial", "POST", {});
+    expect(trial.data.status).toBe("trial");
+    expect(trial.data.daysLeft).toBe(14);
+    const bad = await call("/license/activate", "POST", { key: "JX1-bad" });
+    expect(bad.status).toBe(400);
+    const projects = await call("/projects");
+    const p = projects.data[0];
+    const generate = await call(`/projects/${p.id}/generate`, "POST", {
+      shotIds: [p.shots[0].id],
+    });
+    expect(generate.status).toBe(202);
+    expect(generate.data.jobs).toHaveLength(1);
+  });
+});
+
+describe("项目 AI 用量", () => {
+  let srv: Awaited<ReturnType<typeof startServer>>;
+  let url = "";
+  const ts = () => new Date().toISOString();
+  const putJob = (j: Record<string, unknown>) =>
+    srv.store.put("job", String(j.id), {
+      progress: 0,
+      message: "",
+      createdAt: ts(),
+      updatedAt: ts(),
+      attempts: 0,
+      provider: "test",
+      ...j,
+    });
+  beforeAll(async () => {
+    srv = await startServer({
+      root: await mkdtemp(join(tmpdir(), "jingxu-usage-api-")),
+      port: 0,
+      seed: false,
+      startQueue: false,
+    });
+    url = `http://127.0.0.1:${srv.port}`;
+  });
+  afterAll(async () => {
+    const root = srv.store.root;
+    await srv.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const call = (path: string, method = "GET", body?: unknown) =>
+    requestAt(url, srv.token, path, method, body);
+
+  it("聚合本项目成功任务的用量，忽略失败与其他项目", async () => {
+    const a = (await call("/projects", "POST", { name: "用量项目" })).data;
+    const b = (await call("/projects", "POST", { name: "其他项目" })).data;
+    putJob({
+      id: "j1",
+      projectId: a.id,
+      type: "generate",
+      state: "succeeded",
+      duration: 6,
+    });
+    putJob({
+      id: "j2",
+      projectId: a.id,
+      type: "image",
+      state: "succeeded",
+    });
+    putJob({
+      id: "j3",
+      projectId: a.id,
+      type: "speech",
+      state: "succeeded",
+      speechText: "一二三四五",
+    });
+    putJob({
+      id: "j4",
+      projectId: a.id,
+      type: "transcribe",
+      state: "succeeded",
+      usage: { seconds: 8 },
+    });
+    putJob({
+      id: "j5",
+      projectId: a.id,
+      type: "image",
+      state: "failed",
+    });
+    putJob({
+      id: "j6",
+      projectId: b.id,
+      type: "image",
+      state: "succeeded",
+    });
+
+    const usage = await call(`/projects/${a.id}/usage`);
+    expect(usage.status).toBe(200);
+    expect(usage.data).toEqual({
+      rows: [
+        { kind: "video", unit: "seconds", quantity: 6, jobs: 1 },
+        { kind: "image", unit: "images", quantity: 1, jobs: 1 },
+        { kind: "speech", unit: "characters", quantity: 5, jobs: 1 },
+        { kind: "transcription", unit: "seconds", quantity: 8, jobs: 1 },
+      ],
+      totalJobs: 4,
+    });
+    const other = await call(`/projects/${b.id}/usage`);
+    expect(other.data).toEqual({
+      rows: [{ kind: "image", unit: "images", quantity: 1, jobs: 1 }],
+      totalJobs: 1,
+    });
+    expect((await call("/projects/missing/usage")).status).toBe(404);
+  });
+
+  it("保存用户自填单价并往返；空值留空、负数拒绝", async () => {
+    const s = (await call("/settings")).data;
+    for (const key of [
+      "image",
+      "transcription",
+      "speech",
+      "generation",
+      "agent",
+    ])
+      delete s[key]?.hasApiKey;
+    s.pricing = {
+      currency: "$",
+      videoPerSecond: 1.5,
+      imagePerImage: "",
+      speechPerKiloChar: 0.2,
+    };
+    const saved = await call("/settings", "PUT", s);
+    expect(saved.status).toBe(200);
+    expect((await call("/settings")).data.pricing).toEqual({
+      currency: "$",
+      videoPerSecond: 1.5,
+      speechPerKiloChar: 0.2,
+    });
+
+    s.pricing = { currency: "¥", videoPerSecond: -1 };
+    expect((await call("/settings", "PUT", s)).status).toBe(400);
+  });
+});
+
+async function requestAt(
+  base: string,
+  token: string,
+  path: string,
+  method = "GET",
+  body?: unknown,
+) {
+  const r = await fetch(base + "/api" + path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return {
+    status: r.status,
+    data: r.status === 204 ? undefined : await r.json(),
+  };
+}

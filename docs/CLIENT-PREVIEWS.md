@@ -1,5 +1,13 @@
 # 客户端开发预览
 
+## 2026-11-06 本地验收
+
+桌面 0.1.10 的本轮构建位于 `release/macos-0.1.10-local-qa/` 和 `release/Jingxu-Studio-0.1.10-win-x64.exe`。Apple Silicon 包内引擎跑通实际 MP4、SRT 和 ZIP 恢复。Windows 通过交叉构建和 PE/ASAR 检查。两个版本均用于本地验收，正式签名和 Windows 原生执行待验证。Mac 的打包 FFmpeg 自报不可再分发，标签发布会拦截。手机预览继续使用下列 0.1.6 产物。
+
+[Mac 包内检查](../release/macos-0.1.10-local-qa/package-check.json) · [Windows 包结构检查](../release/windows-package-check.json) · [桌面试点](DESKTOP-PILOT.md)
+
+## 2026-11-05 历史预览
+
 2026-11-05。当前桌面 0.1.9，手机 0.1.6，均为工作区开发预览。
 
 | 平台                | 产物                                                                                                                                              | 验证范围                                                                             |

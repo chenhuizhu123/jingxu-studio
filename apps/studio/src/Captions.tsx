@@ -5,6 +5,7 @@ import type {
   Shot,
   Job,
   Settings,
+  Pricing,
 } from "../../../packages/core/src/model";
 import {
   captionSource,
@@ -12,6 +13,7 @@ import {
   sameCaptionSource,
   type CaptionTrack,
 } from "../../../packages/core/src/captions";
+import { estimateTranscription } from "../../../packages/core/src/usage";
 import { api, post, mediaUrl } from "./api";
 import { t } from "./i18n";
 export type PublicTranscription = Omit<Settings["transcription"], "apiKey"> & {
@@ -97,6 +99,7 @@ export function CaptionEditor({
   onSaved,
   onClose,
   openSettings,
+  pricing,
 }: {
   project: ViewProject;
   shot: Shot;
@@ -105,6 +108,7 @@ export function CaptionEditor({
   onSaved: () => Promise<void>;
   onClose: () => void;
   openSettings: () => void;
+  pricing?: Pricing;
 }) {
   const source = captionSource(shot),
     asset = project.assets.find((a) => a.id === source?.assetId),
@@ -130,6 +134,10 @@ export function CaptionEditor({
   );
   const ready = !!(config?.endpoint && config.model && config.hasApiKey),
     usable = !!asset && ["audio", "video"].includes(asset.kind);
+  const transcriptionEstimate = estimateTranscription(
+    source?.duration ?? 0,
+    pricing,
+  );
   const current = draft && sameCaptionSource(draft.source, source);
   const valid = !!draft && captionTrackSchema.safeParse(draft).success;
   function changeCue(index: number, key: string, value: unknown) {
@@ -285,6 +293,25 @@ export function CaptionEditor({
           <p>
             {config?.model} · {config?.language || t("自动检测")}
           </p>
+          <div className="review-cost">
+            <span>{t("预计成本")}</span>
+            {transcriptionEstimate.cost !== undefined ? (
+              <>
+                <strong>
+                  ≈ {transcriptionEstimate.currency}
+                  {Number(transcriptionEstimate.cost.toFixed(4))}
+                </strong>
+                <small>
+                  · {transcriptionEstimate.seconds} {t("秒")}
+                  {t("，以服务商账单为准。")}
+                </small>
+              </>
+            ) : (
+              <small>
+                · {transcriptionEstimate.seconds} {t("秒")}
+              </small>
+            )}
+          </div>
           <p>
             {t(
               "仅发送本镜头实际使用的音频片段，不含背景音乐。服务商可能收费。",

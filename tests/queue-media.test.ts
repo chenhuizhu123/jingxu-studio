@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,13 +17,20 @@ import {
 } from "../packages/core/src/model";
 import {
   createDemoAsset,
+  ffmpegPath,
+  ffprobePath,
   renderVideo,
+  renderAnimatic,
+  animaticStillAssetId,
+  placeholderSvg,
   runFfmpeg,
 } from "../packages/core/src/media";
+import { summarizeUsage } from "../packages/core/src/usage";
 let store: Store | undefined,
   queue: JobQueue | undefined,
   server: Server | undefined;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await queue?.close();
   queue = undefined;
   if (server) {
@@ -55,6 +62,42 @@ async function terminal(jobId: string) {
   throw new Error("测试等待任务超时");
 }
 describe("任务调度与媒体输出", () => {
+  it("locates both unpacked media binaries with Windows ASAR paths", () => {
+    const path = String.raw`C:\Program Files\Jingxu\resources\app.asar\node_modules`;
+    vi.stubEnv("JINGXU_FFMPEG", `${path}\\ffmpeg-static\\ffmpeg.exe`);
+    vi.stubEnv("JINGXU_FFPROBE", `${path}\\ffprobe-static\\ffprobe.exe`);
+    expect(ffmpegPath()).toContain(String.raw`\app.asar.unpacked\node_modules`);
+    expect(ffprobePath()).toContain(
+      String.raw`\app.asar.unpacked\node_modules`,
+    );
+  });
+  it("does not enqueue an export with a missing asset or stale captions", async () => {
+    const p = await setup();
+    expect(() => queue!.enqueue(p.id, "export")).toThrow(
+      "请为每个镜头选择素材后再渲染",
+    );
+    for (const [i, shot] of p.shots.entries()) {
+      addVersion(
+        p,
+        shot.id,
+        await createDemoAsset(store!, i),
+        "素材",
+        "demo",
+        "demo",
+      );
+    }
+    p.shots[0].captionTrack = {
+      source: { assetId: id(), start: 0, duration: 2 },
+      origin: "manual",
+      createdAt: now(),
+      cues: [],
+    };
+    store!.put("project", p.id, p);
+    expect(() => queue!.enqueue(p.id, "export")).toThrow(
+      "音轨或剪辑已改变，请重新核对字幕",
+    );
+    expect(store!.jobs()).toEqual([]);
+  });
   it("演示生成真实图片，重复候选不覆盖当前已选", async () => {
     const p = await setup();
     queue!.start();
@@ -258,5 +301,46 @@ describe("任务调度与媒体输出", () => {
     const saved = store!.get<Job>("job", j.id)!;
     expect(saved.state).toBe("failed");
     expect(saved.message).toContain("避免重复计费");
+  });
+  it("预演选帧：优先已选图片，其次参考图，都没有则返回 undefined", async () => {
+    const p = await setup();
+    const shot = p.shots[0];
+    expect(animaticStillAssetId(p, shot)).toBeUndefined();
+    const ref = await createDemoAsset(store!, 3);
+    p.assets.push(ref);
+    shot.referenceIds = [ref.id];
+    expect(animaticStillAssetId(p, shot)).toBe(ref.id);
+    addVersion(p, shot.id, ref, "素材", "demo", "demo");
+    expect(animaticStillAssetId(p, shot)).toBe(ref.id);
+    expect(placeholderSvg(7, "<b>开场&夜景</b>")).toContain("SHOT 07");
+    expect(placeholderSvg(7, "<b>开场&夜景</b>")).not.toContain("<b>");
+  });
+  it("没有任何素材也能入队并渲染免费预演片（占位卡+字幕），且不计入 AI 用量", async () => {
+    const p = await setup();
+    expect(() => queue!.enqueue(p.id, "export")).toThrow();
+    const j = queue!.enqueue(p.id, "animatic");
+    expect(j.type).toBe("animatic");
+    queue!.start();
+    const final = await terminal(j.id);
+    expect(final.state).toBe("succeeded");
+    const saved = store!.project(p.id);
+    expect(saved.exports).toHaveLength(1);
+    const result = saved.exports[0];
+    expect(result.kind).toBe("animatic");
+    expect(result.name).toContain("animatic");
+    const bytes = await readFile(store!.path(result.file));
+    expect(bytes.toString("ascii", 4, 8)).toBe("ftyp");
+    expect(bytes.length).toBeGreaterThan(5000);
+    await runFfmpeg(["-i", store!.path(result.file), "-f", "null", "-"]);
+    await stat(store!.path(`exports/${result.id}.srt`));
+    const usage = summarizeUsage(store!.jobs());
+    expect(usage.totalJobs).toBe(0);
+    expect(usage.rows).toHaveLength(0);
+  }, 30000);
+  it("预演与成片任务互斥，避免并发渲染", async () => {
+    const p = await setup();
+    queue!.enqueue(p.id, "animatic");
+    expect(() => queue!.enqueue(p.id, "animatic")).toThrow("已有渲染任务");
+    expect(() => queue!.enqueue(p.id, "export")).toThrow();
   });
 });

@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
   testMatch: "*.spec.ts",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
   timeout: 45000,
@@ -33,7 +34,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         PORT: "4321",
-        JINGXU_DATA_DIR: ".data-e2e",
+        JINGXU_DATA_DIR: process.env.JINGXU_E2E_DATA_DIR ?? ".data-e2e",
         JINGXU_ALLOWED_ORIGINS: "http://127.0.0.1:5183",
       },
     },

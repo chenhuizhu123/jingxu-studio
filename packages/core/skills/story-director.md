@@ -1,5 +1,6 @@
 ---
 name: story-director
+title: 短剧分镜导演
 description: 将小说或剧本整理为短剧分镜，保持角色、场景、对白与镜头目的清晰。
 ---
 

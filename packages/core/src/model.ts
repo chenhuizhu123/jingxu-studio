@@ -67,7 +67,7 @@ export type Export = {
   id: string;
   name: string;
   file: string;
-  kind: "video" | "archive";
+  kind: "video" | "archive" | "animatic";
   createdAt: string;
   size: number;
   revision: number;
@@ -103,7 +103,7 @@ export type Job = {
   id: string;
   projectId: string;
   shotId?: string;
-  type: "generate" | "export" | "speech" | "transcribe" | "image";
+  type: "generate" | "export" | "speech" | "transcribe" | "image" | "animatic";
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   progress: number;
   message: string;
@@ -122,6 +122,13 @@ export type Job = {
   exportRevision?: number;
   speechText?: string;
   captionResult?: CaptionTrack;
+  // Billable usage measured from data the app already holds (never an
+  // estimated price). Populated at enqueue time for units not otherwise
+  // derivable; only succeeded jobs are counted by summarizeUsage.
+  usage?: {
+    // Seconds of audio sent to transcription.
+    seconds?: number;
+  };
 };
 export type McpConfig = {
   id: string;
@@ -131,6 +138,19 @@ export type McpConfig = {
   args?: string[];
   url?: string;
   enabled: boolean;
+};
+export type Pricing = {
+  // Display symbol only (¥, $, …), no FX conversion.
+  currency: string;
+  // User-filled unit prices from their own provider bill. All optional: a
+  // missing price means that kind is not estimated. Never guessed by the app.
+  videoPerSecond?: number;
+  imagePerImage?: number;
+  speechPerKiloChar?: number;
+  transcriptionPerSecond?: number;
+  // Optional soft monthly spending ceiling in `currency`, used only for the
+  // local budget guardrail. Never blocks jobs and is never billed by Jingxu.
+  monthlyBudget?: number;
 };
 export type Settings = {
   image: { endpoint: string; model: string; apiKey: string };
@@ -157,6 +177,7 @@ export type Settings = {
   agent: { endpoint: string; model: string; apiKey: string };
   mcp: McpConfig[];
   concurrency: number;
+  pricing: Pricing;
 };
 export type Approval = {
   id: string;
@@ -186,6 +207,7 @@ export const defaultSettings: Settings = {
   agent: { endpoint: "", model: "", apiKey: "" },
   mcp: [],
   concurrency: 2,
+  pricing: { currency: "¥" },
 };
 export const projectInput = z.object({
   name: z.string().trim().min(1).max(100),
@@ -212,6 +234,11 @@ export const shotInput = z
     captionTrack: captionTrackSchema.nullable().optional(),
   })
   .strict();
+// Form inputs send "" for empty prices; accept only finite non-negative numbers.
+const priceField = z.preprocess(
+  (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
+  z.number().finite().min(0).max(1_000_000).optional(),
+);
 export const settingsInput = z.object({
   image: z
     .object({
@@ -263,6 +290,16 @@ export const settingsInput = z.object({
     )
     .max(20),
   concurrency: z.number().int().min(1).max(4),
+  pricing: z
+    .object({
+      currency: z.string().trim().max(8).default("¥"),
+      videoPerSecond: priceField,
+      imagePerImage: priceField,
+      speechPerKiloChar: priceField,
+      transcriptionPerSecond: priceField,
+      monthlyBudget: priceField,
+    })
+    .optional(),
 });
 export class AppError extends Error {
   constructor(
@@ -451,6 +488,17 @@ export function storyboardLines(script: string) {
     });
 }
 
+const stylePromptLabel: Record<string, string> = {
+  电影写实: "cinematic realism",
+  国风动画: "Chinese-style animation",
+  治愈手绘: "warm hand-drawn illustration",
+  产品广告: "product commercial",
+  自定义: "custom visual style",
+};
+export function styleForPrompt(style: string, language: "zh" | "en") {
+  if (language !== "en") return style;
+  return stylePromptLabel[style] ?? style;
+}
 export function buildStoryboard(
   project: Project,
   language: "zh" | "en" = "zh",
@@ -490,7 +538,7 @@ export function buildStoryboard(
     prompt:
       language === "zh"
         ? `${project.style}，${project.format}画幅。${text}。保持已绑定角色的面部、发型、服装与场景参考一致。`
-        : `${project.style}, ${project.format}. ${text}. Preserve the cast’s face, hairstyle, wardrobe and setting references.`,
+        : `${styleForPrompt(project.style, "en")}, ${project.format} aspect ratio. ${text}. Preserve the cast’s face, hairstyle, wardrobe and setting references.`,
     characterIds: project.characters
       .filter((c) => text.includes(c.name))
       .map((c) => c.id),

@@ -203,6 +203,7 @@ export class Store {
         apiKey: this.decrypt(s.generation.apiKey),
       },
       agent: { ...s.agent, apiKey: this.decrypt(s.agent.apiKey) },
+      pricing: { ...defaultSettings.pricing, ...s.pricing },
     };
   }
   saveSettings(s: Settings) {

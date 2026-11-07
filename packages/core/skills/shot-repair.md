@@ -1,5 +1,6 @@
 ---
 name: shot-repair
+title: 逐镜返修
 description: 针对角色、场景、构图和节奏问题提出局部返修，保留已选版本和完整历史。
 ---
 

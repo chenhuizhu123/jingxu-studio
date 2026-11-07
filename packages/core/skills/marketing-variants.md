@@ -1,5 +1,6 @@
 ---
 name: marketing-variants
+title: 营销多版本对比
 description: 为营销短视频制作开头、文案、封面和时长的可比较版本。
 ---
 

@@ -92,7 +92,7 @@ export const portableProjectSchema = z.object({
         id: identifier,
         name: z.string().max(200),
         file: z.string().min(1).max(400),
-        kind: z.enum(["video", "archive"]),
+        kind: z.enum(["video", "archive", "animatic"]),
         createdAt: date,
         size: z.number().int().min(0).max(packageLimits.totalBytes).default(0),
         revision: z.number().int().min(1),

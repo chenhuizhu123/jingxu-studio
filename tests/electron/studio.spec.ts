@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 test("原生桌面本地试用导出，项目可创建并重启保留", async () => {
@@ -7,13 +7,13 @@ test("原生桌面本地试用导出，项目可创建并重启保留", async ()
   const launch = () =>
     electron.launch({
       args: ["."],
+      acceptDownloads: true,
       env: { ...process.env, JINGXU_DATA_DIR: root, JINGXU_ELECTRON_TEST: "1" },
     });
   let app = await launch();
   try {
     let page = await app.firstWindow();
-    await page.evaluate(() => localStorage.setItem("jingxu-language", "zh"));
-    await page.reload();
+    await page.getByLabel("Language / 语言").selectOption("zh");
     await expect(
       page.getByRole("heading", { name: "先做出第一支短片" }),
     ).toBeVisible();
@@ -25,7 +25,11 @@ test("原生桌面本地试用导出，项目可创建并重启保留", async ()
     ).toContainText("成片已就绪", { timeout: 20_000 });
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "下载", exact: true }).click();
-    expect((await download).suggestedFilename()).toMatch(/\.mp4$/);
+    const video = await download;
+    expect(video.suggestedFilename()).toMatch(/\.mp4$/);
+    expect(
+      (await readFile((await video.path())!)).toString("ascii", 4, 8),
+    ).toBe("ftyp");
     await expect(page.getByRole("button", { name: /^SRT · R/ })).toBeVisible();
     const safety = await page.evaluate(() => ({
       require: typeof (window as any).require,
@@ -46,6 +50,7 @@ test("原生桌面本地试用导出，项目可创建并重启保留", async ()
     await app.close();
     app = await launch();
     page = await app.firstWindow();
+    await page.getByLabel("Language / 语言").selectOption("zh");
     await page.getByRole("button", { name: "所有项目", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "桌面持久作品", exact: false }),

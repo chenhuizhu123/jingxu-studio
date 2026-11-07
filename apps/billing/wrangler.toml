@@ -1,0 +1,33 @@
+# Cloudflare Worker deployment for the Jingxu billing edge service.
+# Edge-safe only: src/worker.ts uses Web standards (fetch, WebCrypto) and zod.
+# The Node adapters (src/local-server.ts, src/jsonl-storage.ts) are never
+# imported by this entry and are not part of the Worker bundle.
+#
+# First-time setup:
+#   npx wrangler login
+#   npx wrangler kv namespace create BILLING_KV -c apps/billing/wrangler.toml
+#   # paste the returned id into the [[kv_namespaces]] block below
+#   npx wrangler secret put CREEM_API_KEY        -c apps/billing/wrangler.toml
+#   npx wrangler secret put CREEM_WEBHOOK_SECRET -c apps/billing/wrangler.toml
+#   npm run billing:deploy
+#
+# Verify the bundle without deploying: npm run billing:deploy:dry
+name = "jingxu-billing"
+main = "src/worker.ts"
+compatibility_date = "2026-11-06"
+
+# Non-secret configuration. CREEM_PRODUCT_ID is a public product identifier.
+[vars]
+CREEM_PRODUCT_ID = "prod_2aq8elgLi8H8JPjWmFsLr2"
+# Comma-separated browser origins allowed to call checkout; loopback is always
+# allowed for the desktop dev server.
+ALLOWED_ORIGINS = ""
+# Optional: send buyers back into the app after hosted checkout.
+CREEM_SUCCESS_URL = ""
+
+# Order/event ledger. Uncomment after `wrangler kv namespace create BILLING_KV`
+# and replace the id. Without it the service still acks webhooks but keeps no
+# reconciliation journal.
+# [[kv_namespaces]]
+# binding = "BILLING_KV"
+# id = "REPLACE_WITH_KV_NAMESPACE_ID"

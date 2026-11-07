@@ -60,6 +60,7 @@ export async function readSkills(
         const metadata = z
           .object({
             name: z.string().min(1).max(120),
+            title: z.string().min(1).max(120).optional(),
             description: z.string().min(1).max(3000),
           })
           .parse(parsed.data);
@@ -69,7 +70,7 @@ export async function readSkills(
           : entry.name.replace(/\.md$/, "");
         result.set(key, {
           id: key,
-          name: metadata.name,
+          name: metadata.title ?? metadata.name,
           description: metadata.description,
           content,
           builtin,

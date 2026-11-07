@@ -54,6 +54,13 @@ export async function verifyWindowsPackage(directory, version) {
   const entries = listPackage(archive).map((name) =>
     name.replaceAll("\\", "/").replace(/^\//, ""),
   );
+  for (const entry of entries) {
+    assert.match(
+      entry,
+      /^(?:dist|node_modules|package\.json)(?:\/|$)/,
+      `Unexpected file packaged in desktop app: ${entry}`,
+    );
+  }
   const metadata = JSON.parse(extractFile(archive, "package.json").toString());
   assert.equal(metadata.version, version);
   for (const file of [
@@ -82,6 +89,8 @@ export async function verifyWindowsPackage(directory, version) {
     "@langchain/langgraph",
     "@modelcontextprotocol/sdk",
     "gray-matter",
+    "p-queue",
+    "ffprobe-static",
     "sql.js",
     "yauzl",
     "yazl",
@@ -100,6 +109,12 @@ export async function verifyWindowsPackage(directory, version) {
     !entries.some((name) => /node_modules\/@img\/[^/]*darwin/.test(name)),
     "Mac image binaries leaked into the Windows package",
   );
+  assert.ok(
+    !entries.some((name) =>
+      /node_modules\/ffprobe-static\/bin\/(darwin|linux)\//.test(name),
+    ),
+    "Non-Windows ffprobe binaries leaked into the Windows package",
+  );
   const notices = extractFile(
     archive,
     asarPath("dist/runtime/THIRD_PARTY_NOTICES.txt"),
@@ -111,6 +126,18 @@ export async function verifyWindowsPackage(directory, version) {
   const unpacked = join(directory, "resources/app.asar.unpacked/node_modules");
   const engine = await inspectPe(join(directory, "镜序 Studio.exe"));
   const ffmpeg = await inspectPe(join(unpacked, "ffmpeg-static/ffmpeg.exe"));
+  const ffprobeBin = join(unpacked, "ffprobe-static/bin");
+  assert.deepEqual(
+    (await readdir(ffprobeBin)).sort(),
+    ["win32"],
+    "Foreign-platform ffprobe binaries were unpacked",
+  );
+  assert.deepEqual(
+    (await readdir(join(ffprobeBin, "win32"))).sort(),
+    ["x64"],
+    "A 32-bit ffprobe binary was unpacked",
+  );
+  const ffprobe = await inspectPe(join(ffprobeBin, "win32/x64/ffprobe.exe"));
   const imageFiles = await nativeFiles(join(unpacked, "@img"));
   assert.ok(
     imageFiles.some((name) => name.endsWith(".node")),
@@ -127,6 +154,7 @@ export async function verifyWindowsPackage(directory, version) {
     structure: "passed",
     engine,
     ffmpeg,
+    ffprobe,
     imageBinaries: imageFiles.length,
     nativeExecution: "not run; requires Windows",
     guiAcceptance: "pending",

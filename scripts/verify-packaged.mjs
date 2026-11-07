@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import assert from "node:assert/strict";
 import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { extractFile } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 const mac = process.platform === "darwin";
 if (!mac && process.platform !== "win32")
   throw new Error("Run this check on a native macOS or Windows package host.");
@@ -19,7 +19,15 @@ const resources = mac
   : join(dirname(binary), "resources");
 const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
 delete env.JINGXU_FFMPEG;
+delete env.JINGXU_FFPROBE;
 const archive = join(resources, "app.asar");
+for (const entry of listPackage(archive)) {
+  assert.match(
+    entry,
+    /^[/\\](?:dist|node_modules|package\.json)(?:[/\\]|$)/,
+    `Unexpected file packaged in desktop app: ${entry}`,
+  );
+}
 // @electron/asar resolves entries with the host path separator, so the
 // names passed to extractFile must use path.join on Windows too.
 const asarPath = (...parts) => join(...parts);
@@ -56,6 +64,47 @@ const report = resolve(
       ? "release/mac-package-check.json"
       : "release/windows-runtime-check.json"),
 );
+const mediaRoot = join(resources, "app.asar.unpacked", "node_modules");
+const suffix = mac ? "" : ".exe";
+const mediaLicenses = {};
+for (const [name, file] of [
+  ["ffmpeg", join(mediaRoot, "ffmpeg-static", `ffmpeg${suffix}`)],
+  [
+    "ffprobe",
+    join(
+      mediaRoot,
+      "ffprobe-static",
+      "bin",
+      process.platform,
+      process.arch,
+      `ffprobe${suffix}`,
+    ),
+  ],
+]) {
+  const license = spawnSync(file, ["-L"], {
+    encoding: "utf8",
+    timeout: 10000,
+    windowsHide: true,
+  });
+  if (license.error) throw license.error;
+  assert.equal(license.status, 0, `${name} license inspection failed`);
+  const details = `${license.stderr}\n${license.stdout}`;
+  const configuration = details.match(/^\s*configuration: (.+)$/m)?.[1];
+  assert.ok(
+    configuration && license.stdout.trim(),
+    `${name} license metadata missing`,
+  );
+  mediaLicenses[name] = {
+    version: details.match(new RegExp(`^${name} version .+$`, "m"))?.[0],
+    nonfree:
+      /(?:^|\s)--enable-nonfree(?:\s|$)/.test(configuration) ||
+      /not legally redistributable/i.test(details),
+    license: license.stdout.trim(),
+  };
+}
+const nonfree = Object.keys(mediaLicenses).filter(
+  (name) => mediaLicenses[name].nonfree,
+);
 let output = "";
 const child = spawn(
   binary,
@@ -89,6 +138,10 @@ child.on("close", async (code) => {
           mode: "electron-node-no-ui",
           archiveSha256: hash.digest("hex"),
           ...result,
+          mediaLicenses,
+          mediaDistribution: nonfree.length
+            ? "blocked-nonfree"
+            : "source-and-license-review-required",
           guiAcceptance: "pending",
         },
         null,
@@ -96,6 +149,13 @@ child.on("close", async (code) => {
       ) + "\n",
     );
     console.log(`Recorded package check: ${report}`);
+    if (process.env.JINGXU_REQUIRE_REDISTRIBUTABLE_MEDIA === "1") {
+      assert.equal(
+        nonfree.length,
+        0,
+        `Distribution blocked: bundled ${nonfree.join(", ")} was built with nonfree components`,
+      );
+    }
   } catch (error) {
     console.error(error);
     process.exitCode = 1;

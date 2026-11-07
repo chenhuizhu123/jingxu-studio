@@ -154,6 +154,7 @@ async function main() {
           "Skills YAML",
           "license notices",
           "bundled FFmpeg",
+          "bundled FFprobe",
           "bilingual bundled first film",
           "rendered sample MP4 and SRT",
         ],

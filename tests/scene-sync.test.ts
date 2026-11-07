@@ -28,6 +28,7 @@ const scene = "Café · Night";
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "jingxu-scene-sync-"));
   app = await startServer({ root, port: 0, seed: false, startQueue: false });
+  app.license.startTrial();
   reference = await createDemoAsset(app.store, 0);
   existing = await createDemoAsset(app.store, 1);
   const seriesId = id();

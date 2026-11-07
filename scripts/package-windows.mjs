@@ -95,6 +95,11 @@ if (reuseIndex >= 0) {
   );
 }
 await inspectPe(join(stage, "node_modules/ffmpeg-static/ffmpeg.exe"));
+// ffprobe-static bundles its Windows binary in the npm package; no install
+// script is needed, but verify the staged copy before packaging.
+await inspectPe(
+  join(stage, "node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"),
+);
 await rm(join(stage, "dist"), { recursive: true, force: true });
 await cp(join(root, "dist"), join(stage, "dist"), { recursive: true });
 await writeThirdPartyNotices(
@@ -139,6 +144,12 @@ const ffmpegPkg = JSON.parse(
     "utf8",
   ),
 );
+const ffprobePkg = JSON.parse(
+  await readFile(
+    join(stage, "node_modules/ffprobe-static/package.json"),
+    "utf8",
+  ),
+);
 const report = {
   generatedAt: new Date().toISOString(),
   ...result,
@@ -147,6 +158,13 @@ const report = {
     ...result.ffmpeg,
     release: ffmpegPkg[ffmpegPkg.name]["binary-release-tag"],
     sha256: await sha256(join(stage, "node_modules/ffmpeg-static/ffmpeg.exe")),
+  },
+  ffprobe: {
+    ...result.ffprobe,
+    release: ffprobePkg.version,
+    sha256: await sha256(
+      join(stage, "node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"),
+    ),
   },
 };
 await writeFile(

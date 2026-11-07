@@ -11,6 +11,7 @@ import {
   videoPrompt,
 } from "../../../packages/shared/shot-references";
 import { version as appVersion } from "../../../package.json";
+import { episodeBlockers } from "../../../packages/shared/episode-status";
 import {
   VoiceoverComposer,
   SpeechSettingsFields,
@@ -81,6 +82,8 @@ import {
   Volume2,
   ExternalLink,
   WifiOff,
+  Gauge,
+  Calculator,
 } from "lucide-react";
 import type {
   Project,
@@ -91,7 +94,17 @@ import type {
   Finding,
   Approval,
   Settings as AppSettings,
+  Pricing,
 } from "../../../packages/core/src/model";
+import {
+  summarizeUsage,
+  estimateCost,
+  estimateGeneration,
+  workspaceUsage,
+  usageReportCsv,
+  budgetStatus,
+} from "../../../packages/core/src/usage";
+import type { GenerationEstimate } from "../../../packages/core/src/usage";
 import {
   api,
   post,
@@ -102,6 +115,13 @@ import {
   saveText,
   native,
   serverBase,
+  getLicense,
+  startTrial,
+  checkoutLicense,
+  activateLicense,
+  validateLicense,
+  deactivateLicense,
+  type LicenseState,
 } from "./api";
 import "./styles.css";
 
@@ -272,6 +292,10 @@ function App() {
     [shotId, setShotId] = useState(""),
     [jobs, setJobs] = useState<Job[]>([]),
     [settings, setSettings] = useState<PublicSettings>(),
+    [license, setLicense] = useState<LicenseState>(),
+    [welcomeHidden, setWelcomeHidden] = useState(
+      () => localStorage.getItem("jx-welcome-dismissed") === "1",
+    ),
     [skills, setSkills] = useState<any[]>([]),
     [approvals, setApprovals] = useState<Approval[]>([]);
   const [toast, setToast] = useState<{ message: string; error?: boolean }>(),
@@ -292,9 +316,11 @@ function App() {
     [busy, setBusy] = useState(""),
     [mobileInspector, setMobileInspector] = useState(false),
     [inspector, setInspector] = useState<"shot" | "agent">("shot"),
+    [pendingSkill, setPendingSkill] = useState<string | undefined>(),
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
-    [reorderOpen, setReorderOpen] = useState(false);
+    [reorderOpen, setReorderOpen] = useState(false),
+    [batchOpen, setBatchOpen] = useState(false);
   const project = projects.find((p) => p.id === projectId),
     shot = project?.shots.find((s) => s.id === shotId) ?? project?.shots[0];
   const siblingEpisodes = project?.episode
@@ -302,12 +328,38 @@ function App() {
         .filter((p) => p.episode?.seriesId === project.episode?.seriesId)
         .sort((a, b) => a.episode!.number - b.episode!.number)
     : [];
+  const batchTargets = project
+    ? (project.shots.some((s) => !s.selectedVersionId)
+        ? project.shots.filter((s) => !s.selectedVersionId)
+        : project.shots
+      ).map((s) => s.id)
+    : [];
+  const batchEstimate = project
+    ? estimateGeneration(
+        project.shots
+          .filter((s) => batchTargets.includes(s.id))
+          .map((s) => s.duration),
+        settings?.pricing,
+      )
+    : null;
+  const batchAllSelected =
+    !!project &&
+    project.shots.length > 0 &&
+    batchTargets.length === project.shots.length &&
+    project.shots.every((s) => s.selectedVersionId);
   function openEpisode(id: string) {
     setProjectId(id);
     setShotId("");
     setTab("storyboard");
     setView("workspace");
     setMobileInspector(false);
+  }
+  function openStoryboard(shotId?: string) {
+    setTab("storyboard");
+    setFilter("all");
+    setInspector("shot");
+    if (shotId) setShotId(shotId);
+    setMobileInspector(!!shotId);
   }
   const notify = useCallback((message: string, error = false) => {
     setToast({ message, error });
@@ -343,6 +395,7 @@ function App() {
         await connect(c.base, c.token);
         await refresh();
         setSettings(await api("/settings"));
+        setLicense(await getLicense());
         setSkills(await api("/skills"));
         setReady(true);
       } catch (e) {
@@ -352,6 +405,15 @@ function App() {
       }
     })();
   }, [refresh]);
+  useEffect(() => {
+    if (!ready || !license?.creem.configured) return;
+    const interval = setInterval(() => {
+      void getLicense()
+        .then(setLicense)
+        .catch(() => {});
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [ready, license?.creem.configured]);
   useEffect(() => {
     if (!ready || connectionError || connectionOpen) return;
     const interval = setInterval(() => void refresh().catch(() => {}), 2000);
@@ -376,6 +438,13 @@ function App() {
     }
   }
   async function openFirstFilm() {
+    // Opening the guided trial sample is the first real product action:
+    // begin the 14-day trial then, without stacking a welcome modal on the
+    // first-run onboarding.
+    if (license?.status === "none") {
+      const next = await startTrial().catch(() => null);
+      if (next) setLicense(next);
+    }
     let sampleId: string | undefined;
     const ok = await act("first-film", async () => {
       const sample = await post<P>("/samples/first-film");
@@ -393,6 +462,16 @@ function App() {
       onOpen={() => void openFirstFilm()}
     />
   );
+  function useSkillInAgent(skillId: string) {
+    if (!project) {
+      notify(t("请先打开或新建一个作品，再让导演助手使用该 Skill。"), true);
+      return;
+    }
+    setPendingSkill(skillId);
+    setInspector("agent");
+    setMobileInspector(true);
+    setView("workspace");
+  }
   async function patchShot(
     shot: Shot,
     patch: Partial<Shot>,
@@ -573,6 +652,12 @@ function App() {
             </button>
           </div>
         </div>
+        {license && (
+          <EntitlementBanner
+            license={license}
+            onOpenSettings={() => setView("settings")}
+          />
+        )}
         {view === "workspace" && project ? (
           <>
             <header className="project-header">
@@ -709,22 +794,7 @@ function App() {
                       <Button
                         variant="soft"
                         disabled={!!busy || !project.shots.length}
-                        onClick={() =>
-                          void act(
-                            "batch",
-                            () =>
-                              post(`/projects/${projectId}/generate`, {
-                                shotIds: project.shots
-                                  .filter((s) => !s.selectedVersionId)
-                                  .map((s) => s.id).length
-                                  ? project.shots
-                                      .filter((s) => !s.selectedVersionId)
-                                      .map((s) => s.id)
-                                  : project.shots.map((s) => s.id),
-                              }),
-                            t("生成任务已加入队列"),
-                          )
-                        }
+                        onClick={() => setBatchOpen(true)}
                       >
                         <Sparkles size={14} />
                         {busy === "batch" ? t("加入中…") : t("批量生成")}
@@ -908,6 +978,8 @@ function App() {
                       )}
                       image={settings?.image}
                       video={settings?.generation}
+                      pricing={settings?.pricing}
+                      demo={settings?.generation.provider === "demo"}
                       imageRunning={activeJobs.some(
                         (j) => j.shotId === shot.id && j.type === "image",
                       )}
@@ -999,11 +1071,17 @@ function App() {
                     <AgentPanel
                       project={project}
                       skills={skills}
+                      initialSkill={pendingSkill}
                       approvals={approvals.filter(
                         (a) => a.projectId === projectId,
                       )}
                       refresh={refresh}
                       notify={notify}
+                      settings={settings}
+                      onConfigure={() => {
+                        setView("settings");
+                        setMobileInspector(false);
+                      }}
                     />
                   )}
                 </aside>
@@ -1073,17 +1151,17 @@ function App() {
                 act={act}
               />
             ) : tab === "quality" ? (
-              <Quality
-                project={project}
-                onSelect={(id) => {
-                  setShotId(id);
-                  setTab("storyboard");
-                  setMobileInspector(true);
-                }}
-                act={act}
-              />
+              <Quality project={project} onSelect={openStoryboard} act={act} />
             ) : (
-              <Delivery project={project} jobs={jobs} act={act} />
+              <Delivery
+                project={project}
+                jobs={jobs}
+                act={act}
+                onOpenStoryboard={openStoryboard}
+                settings={settings}
+                onSettings={setSettings}
+                notify={notify}
+              />
             )}
           </>
         ) : view === "workspace" ? (
@@ -1254,12 +1332,48 @@ function App() {
             onCreate={() => setNewOpen(true)}
           />
         )}
-        {view === "jobs" && <Jobs jobs={jobs} projects={projects} act={act} />}
+        {view === "jobs" && (
+          <Jobs
+            jobs={jobs}
+            projects={projects}
+            act={act}
+            settings={settings}
+            onSettings={setSettings}
+            notify={notify}
+          />
+        )}
         {view === "skills" && (
           <Skills
             skills={skills}
             refresh={async () => setSkills(await api("/skills"))}
             notify={notify}
+            onUseSkill={useSkillInAgent}
+          />
+        )}
+        {batchOpen && project && batchEstimate && (
+          <BatchCostConfirm
+            estimate={batchEstimate}
+            allSelected={batchAllSelected}
+            demo={settings?.generation.provider === "demo"}
+            busy={busy === "batch"}
+            budgetWarning={monthBudgetWarning(
+              jobs,
+              settings?.pricing,
+              batchEstimate.videoCost,
+            )}
+            onCancel={() => setBatchOpen(false)}
+            onConfirm={() =>
+              void act(
+                "batch",
+                () =>
+                  post(`/projects/${projectId}/generate`, {
+                    shotIds: batchTargets,
+                  }),
+                t("生成任务已加入队列"),
+              ).then((ok) => {
+                if (ok) setBatchOpen(false);
+              })
+            }
           />
         )}
         {reorderOpen && project && (
@@ -1280,12 +1394,21 @@ function App() {
           />
         )}
         {view === "settings" && settings && (
-          <Settings
-            value={settings}
-            onSaved={setSettings}
-            notify={notify}
-            onConnect={() => setConnectionOpen(true)}
-          />
+          <>
+            {license && (
+              <LicenseCard
+                license={license}
+                onChanged={setLicense}
+                notify={notify}
+              />
+            )}
+            <Settings
+              value={settings}
+              onSaved={setSettings}
+              notify={notify}
+              onConnect={() => setConnectionOpen(true)}
+            />
+          </>
         )}
       </main>
       <nav className="mobile-nav">
@@ -1379,6 +1502,31 @@ function App() {
           />
         </Modal>
       )}
+      {ready &&
+        license?.status === "none" &&
+        !welcomeHidden &&
+        !connectionError &&
+        // The first-run onboarding surfaces already invite the user to open
+        // the trial sample (which starts the trial); do not stack modals.
+        !(view === "workspace" && !project) &&
+        view !== "projects" && (
+          <TrialWelcome
+            busy={!!busy}
+            onStart={async () => {
+              try {
+                setLicense(await startTrial());
+                notify(t("14 天试用已开始"));
+              } catch (e) {
+                notify((e as Error).message, true);
+              }
+            }}
+            onLater={() => {
+              localStorage.setItem("jx-welcome-dismissed", "1");
+              setWelcomeHidden(true);
+              setView("settings");
+            }}
+          />
+        )}
       {newOpen && (
         <NewProject
           onClose={() => setNewOpen(false)}
@@ -1572,6 +1720,8 @@ export function ShotEditor({
   captionJobs = [],
   onSpeechQueued,
   onSpeechSettings,
+  pricing,
+  demo,
 }: {
   shot: Shot;
   project: P;
@@ -1601,6 +1751,8 @@ export function ShotEditor({
   speechRunning?: boolean;
   onSpeechQueued?: () => Promise<void>;
   onSpeechSettings?: () => void;
+  pricing?: Pricing;
+  demo?: boolean;
 }) {
   const [draft, setDraft] = useState(shot),
     [changed, setChanged] = useState(false),
@@ -1628,6 +1780,33 @@ export function ShotEditor({
     (a) => a.id === chosen?.assetId && a.kind === "image",
   );
   const imageConfigured = image?.endpoint && image.model && image.hasApiKey;
+  const singleEstimate = estimateGeneration([draft.duration], pricing);
+  const reviewEstimate =
+    !demo && imageReview
+      ? imageReview.kind === "image"
+        ? typeof pricing?.imagePerImage === "number" &&
+          pricing.imagePerImage > 0
+          ? {
+              amount: pricing.imagePerImage,
+              unit: getLocale() === "en" ? "image" : t("张"),
+              qty: 1,
+              currency: pricing.currency?.trim() || "¥",
+            }
+          : null
+        : imageReview.duration
+          ? (() => {
+              const e = estimateGeneration([imageReview.duration!], pricing);
+              return e.videoCost !== undefined
+                ? {
+                    amount: e.videoCost,
+                    unit: t("秒"),
+                    qty: e.videoSeconds,
+                    currency: e.currency,
+                  }
+                : null;
+            })()
+          : null
+      : null;
   useEffect(() => {
     if (!changed) setDraft(shot);
   }, [shot, changed]);
@@ -1674,6 +1853,7 @@ export function ShotEditor({
             shot={shot}
             jobs={captionJobs}
             config={transcription}
+            pricing={pricing}
             onSaved={onSpeechQueued}
             onClose={() => setCaptionsOpen(false)}
             openSettings={() => {
@@ -1894,6 +2074,7 @@ export function ShotEditor({
             saveDraft={async () => !changed || (await save())}
             onQueued={onSpeechQueued}
             openSettings={onSpeechSettings}
+            pricing={pricing}
           />
         )}
         <div className="field">
@@ -2055,6 +2236,19 @@ export function ShotEditor({
         )}
       </div>
       <div className="inspector-footer">
+        {!demo && singleEstimate.videoCost !== undefined && (
+          <span
+            className="shot-cost-hint"
+            title={t("按你填写的每秒单价估算，实际以服务商账单为准。")}
+          >
+            <strong>
+              ≈ {singleEstimate.currency}
+              {Number(singleEstimate.videoCost.toFixed(4))}
+            </strong>{" "}
+            · {singleEstimate.videoSeconds}
+            {t("秒")}
+          </span>
+        )}
         <Button
           onClick={() => void save()}
           disabled={busy || !changed || referenceConflict}
@@ -2092,6 +2286,19 @@ export function ShotEditor({
             <p className="caption">
               {t("确认后会将以下内容发送到你的服务商，可能产生费用。")}
             </p>
+            {reviewEstimate && (
+              <div className="review-cost">
+                <span>{t("预计成本")}</span>
+                <strong>
+                  ≈ {reviewEstimate.currency}
+                  {Number(reviewEstimate.amount.toFixed(4))}
+                </strong>
+                <small>
+                  · {reviewEstimate.qty} {reviewEstimate.unit}
+                  {t("，以服务商账单为准。")}
+                </small>
+              </div>
+            )}
             <p>
               <strong>{imageReview.model}</strong>
               <br />
@@ -2242,7 +2449,9 @@ export function NewProject({
             <select value={style} onChange={(e) => setStyle(e.target.value)}>
               {["电影写实", "国风动画", "治愈手绘", "产品广告", "自定义"].map(
                 (s) => (
-                  <option key={s}>{s}</option>
+                  <option key={s} value={s}>
+                    {t(s)}
+                  </option>
                 ),
               )}
             </select>
@@ -2516,7 +2725,7 @@ function CharacterCard({
     </article>
   );
 }
-function Assets({
+export function Assets({
   project,
   upload,
   onCreate,
@@ -2525,8 +2734,7 @@ function Assets({
   upload: (f: File) => Promise<unknown>;
   onCreate: () => void;
 }) {
-  const [filter, setFilter] = useState("all"),
-    [reorderOpen, setReorderOpen] = useState(false);
+  const [filter, setFilter] = useState("all");
   if (!project)
     return (
       <Empty
@@ -2536,6 +2744,16 @@ function Assets({
         <Button onClick={onCreate}>{t("创建项目")}</Button>
       </Empty>
     );
+  const filters = [
+    { id: "all", name: "全部素材" },
+    { id: "image", name: "图片" },
+    { id: "video", name: "视频" },
+    { id: "audio", name: "音频" },
+    { id: "document", name: "文档" },
+  ];
+  const visibleAssets = project.assets.filter(
+    (a) => filter === "all" || a.kind === filter,
+  );
   return (
     <div className="page-content">
       <div className="section-heading">
@@ -2560,51 +2778,51 @@ function Assets({
         </label>
       </div>
       <div className="segmented">
-        {[
-          { id: "all", name: "全部素材" },
-          { id: "image", name: "图片" },
-          { id: "video", name: "视频" },
-          { id: "audio", name: "音频" },
-          { id: "document", name: "文档" },
-        ].map((f) => (
+        {filters.map((f) => (
           <button
             key={f.id}
             className={filter === f.id ? "active" : ""}
             onClick={() => setFilter(f.id)}
           >
-            {f.name}
+            {t(f.name)}
           </button>
         ))}
       </div>
       <div className="asset-grid">
-        {project.assets
-          .filter((a) => filter === "all" || a.kind === filter)
-          .map((a) => (
-            <article className="asset-card" key={a.id}>
-              <div>
-                {a.kind === "image" ? (
-                  <img src={mediaUrl(a.url)} alt={a.name} />
-                ) : a.kind === "video" ? (
-                  <video src={mediaUrl(a.url)} controls playsInline />
-                ) : a.kind === "audio" ? (
-                  <audio src={mediaUrl(a.url)} controls />
-                ) : (
-                  <FileText size={30} />
-                )}
-              </div>
-              <strong title={a.name}>{a.name}</strong>
-              <span>
-                {bytes(a.size)} · {date(a.createdAt)}
-              </span>
-            </article>
-          ))}
+        {visibleAssets.map((a) => (
+          <article className="asset-card" key={a.id}>
+            <div>
+              {a.kind === "image" ? (
+                <img src={mediaUrl(a.url)} alt={a.name} />
+              ) : a.kind === "video" ? (
+                <video src={mediaUrl(a.url)} controls playsInline />
+              ) : a.kind === "audio" ? (
+                <audio src={mediaUrl(a.url)} controls />
+              ) : (
+                <FileText size={30} />
+              )}
+            </div>
+            <strong title={a.name}>{a.name}</strong>
+            <span>
+              {bytes(a.size)} · {date(a.createdAt)}
+            </span>
+          </article>
+        ))}
       </div>
-      {!project.assets.length && (
+      {!project.assets.length ? (
         <Empty
           icon={ImageIcon}
           title={t("把你的素材带进来")}
           description={t("上传角色定妆图、视频片段或配音，开始组织你的作品。")}
         />
+      ) : (
+        !visibleAssets.length && (
+          <Empty
+            icon={ImageIcon}
+            title={t("该分类还没有素材")}
+            description={t("切换到其他分类查看，或导入新的素材。")}
+          />
+        )
       )}
     </div>
   );
@@ -2696,27 +2914,63 @@ function Quality({
     </div>
   );
 }
-function Delivery({
+export function Delivery({
   project,
   jobs,
   act,
+  onOpenStoryboard,
+  settings,
+  onSettings,
+  notify,
 }: {
   project: P;
   jobs: Job[];
   act: Function;
+  onOpenStoryboard: (shotId?: string) => void;
+  settings?: PublicSettings;
+  onSettings?: (s: PublicSettings) => void;
+  notify?: (message: string, error?: boolean) => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const blockers = episodeBlockers(project);
+  const canRender = project.shots.length > 0 && blockers.length === 0;
+  const readyCount = project.shots.length - blockers.length;
   const busy = jobs.some(
     (j) =>
       j.projectId === project.id &&
       j.type === "export" &&
       ["queued", "running"].includes(j.state),
   );
+  const animaticBusy = jobs.some(
+    (j) =>
+      j.projectId === project.id &&
+      j.type === "animatic" &&
+      ["queued", "running"].includes(j.state),
+  );
+  const [animaticLoading, setAnimaticLoading] = useState(false);
+  const canAnimatic = project.shots.length > 0;
   const latestRender = project.firstFilmSample
     ? jobs
         .filter((job) => job.projectId === project.id && job.type === "export")
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
     : undefined;
+  const usage = summarizeUsage(
+    jobs.filter((job) => job.projectId === project.id),
+  );
+  const usageKindLabel: Record<string, string> = {
+    video: t("视频生成"),
+    image: t("图片生成"),
+    speech: t("配音合成"),
+    transcription: t("语音识别"),
+  };
+  const usageUnitLabel: Record<string, string> = {
+    seconds: t("秒"),
+    images: t("张"),
+    characters: t("字"),
+  };
+  const cost = estimateCost(usage, settings?.pricing);
+  const costByKind = Object.fromEntries(cost.rows.map((r) => [r.kind, r]));
+  const formatCost = (n: number) => Number(n.toFixed(4)).toString();
   return (
     <div className="page-content">
       <div className="section-heading">
@@ -2734,6 +2988,180 @@ function Delivery({
           hasVideo={project.exports.some((entry) => entry.kind === "video")}
         />
       )}
+      <section
+        className="delivery-check"
+        aria-labelledby="delivery-check-title"
+      >
+        <div className="delivery-check-summary">
+          <div className={`finding-icon ${canRender ? "info" : ""}`}>
+            {canRender ? <CheckCircle2 size={19} /> : <AlertCircle size={19} />}
+          </div>
+          <div>
+            <h2 id="delivery-check-title">{t("成片准备")}</h2>
+            <p id="delivery-check-status" role="status">
+              {project.shots.length
+                ? `${readyCount} / ${project.shots.length} · ${t("镜头素材和字幕已就绪")}`
+                : t("先在分镜工作台添加镜头，再选择图片或视频。")}
+            </p>
+            {canRender && <p>MP4 · H.264 · {project.format} · 25 fps</p>}
+          </div>
+          {!project.shots.length && (
+            <Button onClick={() => onOpenStoryboard()}>
+              {t("打开分镜工作台")}
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            aria-describedby="delivery-check-status"
+            disabled={!canRender || busy || loading}
+            onClick={() => {
+              setLoading(true);
+              void act(
+                "render",
+                () => post(`/projects/${project.id}/render`),
+                t("开始渲染，可在任务队列查看进度"),
+              ).finally(() => setLoading(false));
+            }}
+          >
+            {busy ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
+            {busy ? t("正在渲染") : t("渲染成片")}
+          </Button>
+        </div>
+        {blockers.length > 0 && (
+          <ul className="delivery-check-shots">
+            {blockers.map(({ shot, missingMedia, staleCaptions }) => (
+              <li key={shot.id}>
+                <button type="button" onClick={() => onOpenStoryboard(shot.id)}>
+                  <span className="delivery-check-shot">
+                    <strong>
+                      {t("镜头")} {shot.order} · {shot.title}
+                    </strong>
+                    <span>
+                      {[
+                        missingMedia && t("选择一张图片或一段视频"),
+                        staleCaptions && t("音轨或剪辑已改变，请重新核对字幕"),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                  <ChevronRight size={17} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section
+        className="delivery-check delivery-animatic"
+        aria-labelledby="animatic-title"
+      >
+        <div className="delivery-check-summary">
+          <div className="finding-icon info">
+            <Play size={19} />
+          </div>
+          <div>
+            <h2 id="animatic-title">
+              {t("免费预演")}
+              <span className="animatic-tag">{t("本地 · 0 模型费用")}</span>
+            </h2>
+            <p role="note">
+              {t(
+                "正式生成前，先用每个镜头已选的图片或参考图，按时长串成一条带字幕的预演片；还没有素材的镜头会用占位卡代替。不调用任何模型，纯本地合成，用来先判断整场戏的节奏与连贯，再决定把钱花在哪些镜头。",
+              )}
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            disabled={!canAnimatic || animaticBusy || animaticLoading}
+            onClick={() => {
+              setAnimaticLoading(true);
+              void act(
+                "animatic",
+                () => post(`/projects/${project.id}/animatic`),
+                t("开始合成免费预演片，可在任务队列查看进度"),
+              ).finally(() => setAnimaticLoading(false));
+            }}
+          >
+            {animaticBusy ? (
+              <Loader2 className="spin" size={15} />
+            ) : (
+              <Play size={15} />
+            )}
+            {animaticBusy ? t("正在预演") : t("生成免费预演片")}
+          </Button>
+        </div>
+      </section>
+      <section
+        className="settings-card usage-card"
+        aria-labelledby="usage-title"
+      >
+        <header>
+          <Gauge size={18} />
+          <div>
+            <h2 id="usage-title">{t("本项目 AI 用量")}</h2>
+            <p>
+              {t(
+                "按成功任务统计你自己的模型服务调用量；费用由服务商直接收取，镜序可按你填写的单价估算成本。",
+              )}
+            </p>
+          </div>
+        </header>
+        {usage.rows.length ? (
+          <ul className="usage-grid">
+            {usage.rows.map((row) => {
+              const rowCost = costByKind[row.kind]?.cost;
+              return (
+                <li key={row.kind}>
+                  <strong>
+                    {row.quantity}
+                    <small>{usageUnitLabel[row.unit]}</small>
+                  </strong>
+                  <span>{usageKindLabel[row.kind]}</span>
+                  <em>
+                    {row.jobs} {t("次成功任务")}
+                  </em>
+                  {typeof rowCost === "number" && (
+                    <em className="usage-cost">
+                      ≈ {cost.currency}
+                      {formatCost(rowCost)}
+                    </em>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="license-note-info">
+            {t("还没有成功的在线生成任务。本地渲染不计入。")}
+          </p>
+        )}
+        <div className="usage-footer">
+          {cost.pricedKinds > 0 ? (
+            <p className="usage-total">
+              {t("估算合计")}
+              <strong>
+                ≈ {cost.currency}
+                {formatCost(cost.total)}
+              </strong>
+              <span>
+                {t(
+                  "按你填写的服务商单价估算，仅用于与服务商账单对账，不是镜序收费。",
+                )}
+              </span>
+            </p>
+          ) : (
+            <p className="license-note-info">
+              {t("填入服务商账单上的单价，可在本地估算本项目模型成本。")}
+            </p>
+          )}
+          <PricingEditor
+            settings={settings}
+            onSettings={onSettings}
+            notify={notify}
+          />
+        </div>
+      </section>
       <section className="settings-card export-settings">
         <header>
           <SlidersHorizontal size={18} />
@@ -2809,32 +3237,6 @@ function Delivery({
         </label>
       </section>
       <div className="export-options">
-        <article>
-          <div className="export-icon">
-            <Film size={27} />
-          </div>
-          <h2>{t("成片 MP4")}</h2>
-          <p>
-            H.264 · {project.format} · 25 fps
-            <br />
-            {t("按分镜时长拼接已选素材")}
-          </p>
-          <Button
-            variant="primary"
-            disabled={busy || loading}
-            onClick={() => {
-              setLoading(true);
-              void act(
-                "render",
-                () => post(`/projects/${project.id}/render`),
-                t("开始渲染，可在任务队列查看进度"),
-              ).finally(() => setLoading(false));
-            }}
-          >
-            {busy ? <Loader2 className="spin" size={15} /> : <Play size={15} />}{" "}
-            {busy ? t("正在渲染") : t("渲染成片")}
-          </Button>
-        </article>
         <article>
           <div className="export-icon">
             <FolderOpen size={27} />
@@ -2919,12 +3321,19 @@ function Delivery({
               <div className="file-icon">
                 {e.kind === "video" ? (
                   <Film size={21} />
+                ) : e.kind === "animatic" ? (
+                  <Play size={21} />
                 ) : (
                   <FolderOpen size={21} />
                 )}
               </div>
               <div>
-                <strong>{e.name}</strong>
+                <strong>
+                  {e.name}
+                  {e.kind === "animatic" && (
+                    <span className="export-kind">{t("预演")}</span>
+                  )}
+                </strong>
                 <p>
                   R{e.revision} · {date(e.createdAt)} · {bytes(e.size)}
                 </p>
@@ -2964,15 +3373,648 @@ function Delivery({
     </div>
   );
 }
-function Jobs({
+export type BatchBudgetWarning = {
+  level: "near" | "over";
+  currency: string;
+  spent: number;
+  projected: number;
+  budget: number;
+};
+// Project the per-calendar-month budget guardrail onto the moment before a
+// paid batch: month-to-date priced spend across the whole workspace plus the
+// upcoming batch's priced video cost. Returns null unless a positive monthly
+// budget exists and the projection reaches the near/over bands. Advisory only;
+// callers must never block generation on this (same discipline as the bar).
+export function monthBudgetWarning(
+  jobs: Job[],
+  pricing: Pricing | undefined,
+  incoming: number | undefined,
+): BatchBudgetWarning | null {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const monthJobs = jobs.filter(
+    (j) =>
+      j.state === "succeeded" && new Date(j.createdAt).getTime() >= monthStart,
+  );
+  const spent = estimateCost(summarizeUsage(monthJobs), pricing).total;
+  const add =
+    typeof incoming === "number" && isFinite(incoming) && incoming > 0
+      ? incoming
+      : 0;
+  const projected = spent + add;
+  const status = budgetStatus(projected, pricing?.monthlyBudget);
+  if (!status || status.level === "ok") return null;
+  return {
+    level: status.level,
+    currency: pricing?.currency?.trim() || "¥",
+    spent,
+    projected,
+    budget: status.budget,
+  };
+}
+export function BatchCostConfirm({
+  estimate,
+  allSelected,
+  demo,
+  busy,
+  budgetWarning,
+  onCancel,
+  onConfirm,
+}: {
+  estimate: GenerationEstimate;
+  allSelected: boolean;
+  demo: boolean;
+  busy?: boolean;
+  budgetWarning?: BatchBudgetWarning | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const fmt = (n: number) => Number(n.toFixed(4)).toString();
+  const hasIncoming =
+    estimate.videoCost !== undefined && estimate.videoCost > 0;
+  const diff = Math.abs(
+    budgetWarning ? budgetWarning.projected - budgetWarning.budget : 0,
+  );
+  return (
+    <Modal title={t("生成前确认")} onClose={onCancel}>
+      <div className="cost-confirm">
+        <p className="cost-confirm-lead">
+          {allSelected
+            ? t("所有镜头都已有选定候选，本次将为全部镜头重新生成视频候选。")
+            : t("将为尚未确认的镜头生成视频候选，已确认镜头不受影响。")}
+        </p>
+        <ul className="cost-confirm-facts">
+          <li>
+            <span>{t("镜头数量")}</span>
+            <strong>
+              {estimate.shotCount}
+              <small>{t("个")}</small>
+            </strong>
+          </li>
+          <li>
+            <span>{t("预计总时长")}</span>
+            <strong>
+              {estimate.videoSeconds}
+              <small>{t("秒")}</small>
+            </strong>
+          </li>
+        </ul>
+        {demo ? (
+          <div className="notice">
+            <Sparkles size={16} />
+            <span>{t("演示模式 · 不消耗额度，可放心试用。")}</span>
+          </div>
+        ) : estimate.videoCost !== undefined ? (
+          <div className="cost-confirm-price">
+            <span>{t("预计视频成本")}</span>
+            <strong>
+              ≈ {estimate.currency}
+              {Number(estimate.videoCost.toFixed(4))}
+            </strong>
+            <small>
+              {t(
+                "按镜头时长与你填写的每秒单价估算，仅含首轮候选；重做或生成多版会再次计费，实际以服务商账单为准。",
+              )}
+            </small>
+          </div>
+        ) : (
+          <div className="notice">
+            <Calculator size={16} />
+            <span>
+              {t(
+                "尚未设置视频每秒单价，无法预估金额。可先到「任务队列 · 用量与成本总览」填写单价，也可以直接继续。",
+              )}
+            </span>
+          </div>
+        )}
+        {!demo && budgetWarning && (
+          <div
+            className={`budget-warning ${budgetWarning.level}`}
+            role="status"
+          >
+            <AlertCircle size={16} />
+            <div>
+              <strong>
+                {budgetWarning.level === "over"
+                  ? hasIncoming
+                    ? t("本批生成后将超出月度预算")
+                    : t("本月估算支出已超出月度预算")
+                  : hasIncoming
+                    ? t("本批生成后将接近月度预算")
+                    : t("本月估算支出已接近月度预算")}
+              </strong>
+              <p className="budget-warning-meta">
+                <span>
+                  {hasIncoming ? t("本批后估算支出") : t("本月已用估算")}
+                </span>
+                <b>
+                  {budgetWarning.currency}
+                  {fmt(budgetWarning.projected)}
+                </b>
+                <span>{t("月度预算")}</span>
+                <b>
+                  {budgetWarning.currency}
+                  {fmt(budgetWarning.budget)}
+                </b>
+                <span>
+                  {budgetWarning.level === "over" ? t("超出约") : t("剩余约")}
+                </span>
+                <b>
+                  {budgetWarning.currency}
+                  {fmt(diff)}
+                </b>
+              </p>
+              <p className="budget-warning-hint">
+                {t("预算仅在本地提醒，不会阻止生成。")}
+              </p>
+            </div>
+          </div>
+        )}
+        <footer className="modal-footer">
+          <Button type="button" onClick={onCancel}>
+            {t("取消")}
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={onConfirm}>
+            {busy ? (
+              <Loader2 className="spin" size={15} />
+            ) : (
+              <Sparkles size={15} />
+            )}
+            {t("确认加入队列")}
+          </Button>
+        </footer>
+      </div>
+    </Modal>
+  );
+}
+function PricingEditor({
+  settings,
+  onSettings,
+  notify,
+}: {
+  settings?: PublicSettings;
+  onSettings?: (s: PublicSettings) => void;
+  notify?: (m: string, error?: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const fields: { key: keyof Omit<Pricing, "currency">; label: string }[] = [
+    { key: "videoPerSecond", label: t("视频 · 每秒") },
+    { key: "imagePerImage", label: t("图片 · 每张") },
+    { key: "speechPerKiloChar", label: t("配音 · 每千字符") },
+    { key: "transcriptionPerSecond", label: t("识别 · 每秒") },
+  ];
+  const toggle = () => {
+    if (!open) {
+      const p = settings?.pricing;
+      setDraft({
+        currency: p?.currency ?? "¥",
+        videoPerSecond: p?.videoPerSecond?.toString() ?? "",
+        imagePerImage: p?.imagePerImage?.toString() ?? "",
+        speechPerKiloChar: p?.speechPerKiloChar?.toString() ?? "",
+        transcriptionPerSecond: p?.transcriptionPerSecond?.toString() ?? "",
+        monthlyBudget: p?.monthlyBudget?.toString() ?? "",
+      });
+    }
+    setOpen(!open);
+  };
+  const save = async () => {
+    if (!settings) return;
+    const next: Pricing = { currency: draft.currency?.trim() || "¥" };
+    for (const f of fields) {
+      const raw = (draft[f.key] ?? "").trim();
+      if (!raw) continue;
+      const value = Number(raw);
+      if (!isFinite(value) || value < 0) {
+        notify?.(t("单价必须是不小于 0 的数字"), true);
+        return;
+      }
+      next[f.key] = value;
+    }
+    const budgetRaw = (draft.monthlyBudget ?? "").trim();
+    if (budgetRaw) {
+      const budget = Number(budgetRaw);
+      if (!isFinite(budget) || budget < 0) {
+        notify?.(t("月度预算必须是不小于 0 的数字"), true);
+        return;
+      }
+      next.monthlyBudget = budget;
+    }
+    setSaving(true);
+    try {
+      const saved = await api<PublicSettings>("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ ...settings, pricing: next }),
+      });
+      onSettings?.(saved);
+      setOpen(false);
+      notify?.(t("单价已保存"));
+    } catch (e) {
+      notify?.((e as Error).message, true);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="usage-pricing-editor">
+      <button
+        type="button"
+        className="btn soft usage-pricing-toggle"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <Calculator size={14} />
+        {open ? t("收起单价设置") : t("设置单价")}
+      </button>
+      {open && (
+        <div className="usage-pricing">
+          <label className="field usage-currency">
+            <span>{t("货币符号")}</span>
+            <input
+              value={draft.currency ?? ""}
+              maxLength={8}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, currency: e.target.value }))
+              }
+            />
+          </label>
+          {fields.map((f) => (
+            <label className="field" key={f.key}>
+              <span>{f.label}</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                placeholder="0"
+                value={draft[f.key] ?? ""}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, [f.key]: e.target.value }))
+                }
+              />
+            </label>
+          ))}
+          <label className="field usage-budget-field">
+            <span>{t("月度预算（可选，仅本地提醒）")}</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              placeholder="0"
+              value={draft.monthlyBudget ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, monthlyBudget: e.target.value }))
+              }
+            />
+          </label>
+          <div className="usage-pricing-actions">
+            <Button onClick={() => void save()}>
+              {saving ? (
+                <Loader2 className="spin" size={15} />
+              ) : (
+                <Check size={15} />
+              )}
+              {t("保存单价")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+export function WorkspaceUsage({
+  jobs,
+  projects,
+  settings,
+  onSettings,
+  notify,
+}: {
+  jobs: Job[];
+  projects: P[];
+  settings?: PublicSettings;
+  onSettings?: (s: PublicSettings) => void;
+  notify?: (m: string, error?: boolean) => void;
+}) {
+  const ranges = [
+    { key: "month", label: t("本月") },
+    { key: "30d", label: t("近 30 天") },
+    { key: "all", label: t("全部") },
+  ] as const;
+  const [range, setRange] = useState<(typeof ranges)[number]["key"]>("month");
+  const kindLabel: Record<string, string> = {
+    video: t("视频生成"),
+    image: t("图片生成"),
+    speech: t("配音合成"),
+    transcription: t("语音识别"),
+  };
+  const unitLabel: Record<string, string> = {
+    seconds: t("秒"),
+    images: t("张"),
+    characters: t("字"),
+  };
+  const now = Date.now();
+  const from =
+    range === "all"
+      ? 0
+      : range === "30d"
+        ? now - 30 * 86_400_000
+        : new Date(
+            new Date().getFullYear(),
+            new Date().getMonth(),
+            1,
+          ).getTime();
+  const scoped = jobs.filter(
+    (j) => new Date(j.createdAt).getTime() >= from && j.state === "succeeded",
+  );
+  const report = workspaceUsage(
+    scoped,
+    (id) => projects.find((p) => p.id === id)?.name,
+    settings?.pricing,
+    t("项目已删除"),
+  );
+  const formatCost = (n: number) => Number(n.toFixed(4)).toString();
+  // The budget is a per-calendar-month ceiling, so it is only compared on
+  // the "本月" tab and only when at least one unit price is configured.
+  const budget =
+    range === "month" && report.total.pricedKinds > 0
+      ? budgetStatus(report.total.total, settings?.pricing?.monthlyBudget)
+      : null;
+  const pct = budget ? Math.min(100, Math.round(budget.ratio * 100)) : 0;
+  const exportCsv = () => {
+    const csv = usageReportCsv(report, {
+      project: t("项目"),
+      video: `${t("视频生成")}(${t("秒")})`,
+      image: `${t("图片生成")}(${t("张")})`,
+      speech: `${t("配音合成")}(${t("字")})`,
+      transcription: `${t("语音识别")}(${t("秒")})`,
+      jobs: t("成功任务"),
+      cost: t("估算成本"),
+      total: t("合计"),
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    saveText(
+      `jingxu-usage-${range}-${stamp}.csv`,
+      "﻿" + csv,
+      "text/csv;charset=utf-8",
+    );
+  };
+  return (
+    <section
+      className="settings-card usage-card workspace-usage"
+      aria-labelledby="workspace-usage-title"
+    >
+      <header>
+        <Gauge size={18} />
+        <div>
+          <h2 id="workspace-usage-title">{t("用量与成本总览")}</h2>
+          <p>
+            {t(
+              "按时间范围汇总所有项目的成功任务，按你填写的单价估算，可导出 CSV 与服务商或客户对账。",
+            )}
+          </p>
+        </div>
+      </header>
+      <div className="usage-range">
+        {ranges.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            className={`btn soft${range === r.key ? " active" : ""}`}
+            aria-pressed={range === r.key}
+            onClick={() => setRange(r.key)}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      {report.projects.length === 0 ? (
+        <p className="license-note-info">{t("没有符合时间范围的成功任务。")}</p>
+      ) : (
+        <>
+          <ul className="usage-grid">
+            {report.total.rows.map((row) => (
+              <li key={row.kind}>
+                <strong>
+                  {row.quantity}
+                  <small>{unitLabel[row.unit]}</small>
+                </strong>
+                <span>{kindLabel[row.kind]}</span>
+                <em>
+                  {row.jobs} {t("次成功任务")}
+                </em>
+              </li>
+            ))}
+          </ul>
+          {report.total.pricedKinds > 0 && (
+            <p className="usage-total">
+              {t("估算合计")}
+              <strong>
+                ≈ {report.total.currency}
+                {formatCost(report.total.total)}
+              </strong>
+            </p>
+          )}
+          {budget && (
+            <div
+              className={`budget-guard ${budget.level}`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="budget-head">
+                <span className="budget-title">
+                  {t("本月预算")} {report.total.currency}
+                  {formatCost(budget.budget)}
+                </span>
+                <span className="budget-meta">
+                  {budget.level === "over"
+                    ? `${t("已超出")} ${report.total.currency}${formatCost(
+                        -budget.remaining,
+                      )}（${pct}%）`
+                    : `${t("已用")} ${pct}% · ${t("剩余预算")} ${
+                        report.total.currency
+                      }${formatCost(budget.remaining)}`}
+                </span>
+              </div>
+              <div
+                className="budget-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={pct}
+                aria-label={t("本月预算使用比例")}
+              >
+                <div className="budget-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="budget-note">
+                {budget.level === "over"
+                  ? t(
+                      "本月估算成本已超过预算。仅本地提醒，不会阻止生成，实际以服务商账单为准。",
+                    )
+                  : budget.level === "near"
+                    ? t(
+                        "本月预算已用超过 80%，留意后续生成花费；实际以服务商账单为准。",
+                      )
+                    : t("按你填写的单价估算，仅本地提醒，不会阻止生成。")}
+              </p>
+            </div>
+          )}
+          <div className="usage-table-wrap">
+            <table className="usage-table">
+              <thead>
+                <tr>
+                  <th>{t("项目")}</th>
+                  <th>{t("成功任务")}</th>
+                  <th className="num">{t("估算成本")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.projects.map((p) => (
+                  <tr key={p.projectId}>
+                    <td>{p.projectName}</td>
+                    <td>{p.summary.totalJobs}</td>
+                    <td className="num">
+                      {p.cost.pricedKinds > 0
+                        ? `≈ ${p.cost.currency}${formatCost(p.cost.total)}`
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="usage-footer">
+            <p className="license-note-info">
+              {t(
+                "成本按你填写的服务商单价估算，仅用于与服务商账单对账，不是镜序收费。",
+              )}
+            </p>
+            <button type="button" className="btn soft" onClick={exportCsv}>
+              <Download size={14} />
+              {t("导出 CSV")}
+            </button>
+          </div>
+          <PricingEditor
+            settings={settings}
+            onSettings={onSettings}
+            notify={notify}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+export function Jobs({
   jobs,
   projects,
   act,
+  settings,
+  onSettings,
+  notify,
 }: {
   jobs: Job[];
   projects: P[];
   act: Function;
+  settings?: PublicSettings;
+  onSettings?: (s: PublicSettings) => void;
+  notify?: (m: string, error?: boolean) => void;
 }) {
+  const active = jobs.filter((j) => ["queued", "running"].includes(j.state));
+  const history = jobs.filter((j) => !["queued", "running"].includes(j.state));
+  const renderJob = (j: Job) => (
+    <article key={j.id}>
+      <div className={`job-icon ${j.state}`}>
+        {j.state === "running" ? (
+          <Loader2 className="spin" size={21} />
+        ) : j.state === "succeeded" ? (
+          <Check size={21} />
+        ) : j.state === "failed" ? (
+          <AlertCircle size={21} />
+        ) : (
+          <Clock3 size={21} />
+        )}
+      </div>
+      <div className="job-detail">
+        <div>
+          <strong>
+            {j.type === "export"
+              ? t("成片渲染")
+              : j.type === "animatic"
+                ? t("免费预演")
+                : `${t("镜头")} ${projects.find((p) => p.id === j.projectId)?.shots.find((s) => s.id === j.shotId)?.order ?? ""} ${t({ speech: "台词配音", transcribe: "字幕识别", image: "图片生成", generate: j.firstFrameAssetId ? "首帧视频生成" : "候选生成" }[j.type])}`}
+          </strong>
+          <span className={`job-state ${j.state}`}>
+            {t(
+              {
+                queued: "排队中",
+                running: "执行中",
+                succeeded: "已完成",
+                failed: "失败",
+                cancelled: "已取消",
+              }[j.state],
+            )}
+          </span>
+        </div>
+        <p>
+          {projects.find((p) => p.id === j.projectId)?.name ?? t("项目已删除")}{" "}
+          · {j.provider === "demo" ? t("演示素材") : j.provider} ·{" "}
+          {date(j.createdAt)}
+        </p>
+        <div className="job-message">{t(j.error ?? j.message)}</div>
+        {j.type === "speech" && (
+          <details>
+            <summary>{t("配音文本快照")}</summary>
+            <p>{j.speechText}</p>
+            <small>
+              {t(
+                "重新创建配音将使用当前已保存的台词与语音设置，可能再次计费。",
+              )}
+            </small>
+          </details>
+        )}
+        {j.remoteId && (
+          <small>
+            {t("远程任务：")}
+            {j.remoteId}
+          </small>
+        )}
+        {["queued", "running"].includes(j.state) && (
+          <div className="progress">
+            <i style={{ width: `${j.progress}%` }} />
+          </div>
+        )}
+      </div>
+      {["queued", "running"].includes(j.state) ? (
+        <Button
+          onClick={() =>
+            void act(
+              "cancel",
+              () => post(`/jobs/${j.id}/cancel`),
+              t("本地任务已停止"),
+            )
+          }
+        >
+          {t("取消")}
+        </Button>
+      ) : ["failed", "cancelled"].includes(j.state) &&
+        j.type !== "image" &&
+        !j.firstFrameAssetId ? (
+        <Button
+          onClick={() =>
+            void act(
+              "retry",
+              () => post(`/jobs/${j.id}/retry`),
+              t("新任务已加入队列"),
+            )
+          }
+        >
+          <RefreshCw size={14} />
+          {t("重新创建")}
+        </Button>
+      ) : null}
+    </article>
+  );
   return (
     <div className="page-content">
       <div className="page-title">
@@ -2984,100 +4026,28 @@ function Jobs({
           )}
         </p>
       </div>
-      <div className="job-list">
-        {jobs.map((j) => (
-          <article key={j.id}>
-            <div className={`job-icon ${j.state}`}>
-              {j.state === "running" ? (
-                <Loader2 className="spin" size={21} />
-              ) : j.state === "succeeded" ? (
-                <Check size={21} />
-              ) : j.state === "failed" ? (
-                <AlertCircle size={21} />
-              ) : (
-                <Clock3 size={21} />
-              )}
-            </div>
-            <div className="job-detail">
-              <div>
-                <strong>
-                  {j.type === "export"
-                    ? t("成片渲染")
-                    : `${t("镜头")} ${projects.find((p) => p.id === j.projectId)?.shots.find((s) => s.id === j.shotId)?.order ?? ""} ${t({ speech: "台词配音", transcribe: "字幕识别", image: "图片生成", generate: j.firstFrameAssetId ? "首帧视频生成" : "候选生成" }[j.type])}`}
-                </strong>
-                <span className={`job-state ${j.state}`}>
-                  {t(
-                    {
-                      queued: "排队中",
-                      running: "执行中",
-                      succeeded: "已完成",
-                      failed: "失败",
-                      cancelled: "已取消",
-                    }[j.state],
-                  )}
-                </span>
-              </div>
-              <p>
-                {projects.find((p) => p.id === j.projectId)?.name ??
-                  t("项目已删除")}{" "}
-                · {j.provider === "demo" ? t("演示素材") : j.provider} ·{" "}
-                {date(j.createdAt)}
-              </p>
-              <div className="job-message">{t(j.error ?? j.message)}</div>
-              {j.type === "speech" && (
-                <details>
-                  <summary>{t("配音文本快照")}</summary>
-                  <p>{j.speechText}</p>
-                  <small>
-                    {t(
-                      "重新创建配音将使用当前已保存的台词与语音设置，可能再次计费。",
-                    )}
-                  </small>
-                </details>
-              )}
-              {j.remoteId && (
-                <small>
-                  {t("远程任务：")}
-                  {j.remoteId}
-                </small>
-              )}
-              {["queued", "running"].includes(j.state) && (
-                <div className="progress">
-                  <i style={{ width: `${j.progress}%` }} />
-                </div>
-              )}
-            </div>
-            {["queued", "running"].includes(j.state) ? (
-              <Button
-                onClick={() =>
-                  void act(
-                    "cancel",
-                    () => post(`/jobs/${j.id}/cancel`),
-                    t("本地任务已停止"),
-                  )
-                }
-              >
-                {t("取消")}
-              </Button>
-            ) : ["failed", "cancelled"].includes(j.state) &&
-              j.type !== "image" &&
-              !j.firstFrameAssetId ? (
-              <Button
-                onClick={() =>
-                  void act(
-                    "retry",
-                    () => post(`/jobs/${j.id}/retry`),
-                    t("新任务已加入队列"),
-                  )
-                }
-              >
-                <RefreshCw size={14} />
-                {t("重新创建")}
-              </Button>
-            ) : null}
-          </article>
-        ))}
-      </div>
+      {active.length > 0 && (
+        <section className="jobs-band active">
+          <div className="jobs-band-label">
+            <Loader2 size={14} className="spin" />
+            {t("进行中的任务")} · {active.length}
+          </div>
+          <div className="job-list">{active.map(renderJob)}</div>
+        </section>
+      )}
+      <WorkspaceUsage
+        jobs={jobs}
+        projects={projects}
+        settings={settings}
+        onSettings={onSettings}
+        notify={notify}
+      />
+      {history.length > 0 && (
+        <section className="jobs-band history">
+          <div className="jobs-band-label">{t("历史任务")}</div>
+          <div className="job-list">{history.map(renderJob)}</div>
+        </section>
+      )}
       {!jobs.length && (
         <Empty
           icon={ListTodo}
@@ -3088,22 +4058,34 @@ function Jobs({
     </div>
   );
 }
-function AgentPanel({
+export function AgentPanel({
   project,
   skills,
+  initialSkill,
   approvals,
   refresh,
   notify,
+  settings,
+  onConfigure,
 }: {
   project: P;
   skills: any[];
+  initialSkill?: string;
   approvals: Approval[];
   refresh: () => Promise<void>;
   notify: (m: string, e?: boolean) => void;
+  settings?: PublicSettings;
+  onConfigure?: () => void;
 }) {
   const [text, setText] = useState(""),
-    [skill, setSkill] = useState("shot-repair"),
+    [skill, setSkill] = useState(initialSkill ?? ""),
     [loading, setLoading] = useState(false);
+  const selectedSkill = skills.find((s) => s.id === skill);
+  const agentReady = !!(
+    settings?.agent.endpoint &&
+    settings.agent.model &&
+    settings.agent.hasApiKey
+  );
   return (
     <>
       <div className="agent-scroll">
@@ -3118,6 +4100,25 @@ function AgentPanel({
             {t("它会读取项目，再通过工具推进。")}
           </p>
         </div>
+        {!agentReady && (
+          <div className="agent-setup-notice" role="status">
+            <AlertCircle size={17} />
+            <div>
+              <strong>{t("还没有配置导演助手模型")}</strong>
+              <p>
+                {t(
+                  "导演助手使用你自带的对话模型（与视频生成服务分开配置）。填好服务地址、模型 ID 和 API Key 后即可开始对话。",
+                )}
+              </p>
+              {onConfigure && (
+                <Button variant="soft" onClick={onConfigure}>
+                  <Settings2 size={14} />
+                  {t("去配置模型")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         {!project.messages.length && (
           <div className="suggestions">
             {[
@@ -3184,6 +4185,10 @@ function AgentPanel({
         className="agent-composer"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!agentReady) {
+            onConfigure?.();
+            return;
+          }
           setLoading(true);
           void post(`/projects/${project.id}/chat`, { text, skill })
             .then(async () => {
@@ -3199,12 +4204,18 @@ function AgentPanel({
           value={skill}
           onChange={(e) => setSkill(e.target.value)}
         >
+          <option value="">{t("不指定 · 通用导演助手")}</option>
           {skills.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
           ))}
         </select>
+        <p className="skill-hint">
+          {selectedSkill
+            ? selectedSkill.description
+            : t("不套用特定创作规则，由通用导演助手通读项目后给建议。")}
+        </p>
         <textarea
           aria-label={t("给导演助手的消息")}
           value={text}
@@ -3213,11 +4224,16 @@ function AgentPanel({
           placeholder={t("如：保留场景，帮我改写第 3 镜头的返修提示词")}
         />
         <div>
-          <span>{t("使用设置中的模型与 Key")}</span>
+          <span className={agentReady ? undefined : "muted-warn"}>
+            {agentReady
+              ? t("使用设置中的模型与 Key")
+              : t("未配置模型 · 点上方按钮前往设置")}
+          </span>
           <button
             type="submit"
             aria-label={t("发送给导演助手")}
-            disabled={loading || !text.trim()}
+            disabled={loading || !agentReady || !text.trim()}
+            title={agentReady ? t("发送给导演助手") : t("请先配置导演助手模型")}
           >
             <Send size={15} />
           </button>
@@ -3226,18 +4242,21 @@ function AgentPanel({
     </>
   );
 }
-function Skills({
+export function Skills({
   skills,
   refresh,
   notify,
+  onUseSkill,
 }: {
   skills: any[];
   refresh: () => Promise<void>;
   notify: (m: string, e?: boolean) => void;
+  onUseSkill: (skillId: string) => void;
 }) {
   const [open, setOpen] = useState(false),
     [selected, setSelected] = useState<any>(),
     [name, setName] = useState(""),
+    [title, setTitle] = useState(""),
     [description, setDescription] = useState(""),
     [content, setContent] = useState("");
   return (
@@ -3282,6 +4301,18 @@ function Skills({
           wide
         >
           <pre className="skill-content">{selected.content}</pre>
+          <footer className="modal-footer">
+            <Button
+              variant="primary"
+              onClick={() => {
+                onUseSkill(selected.id);
+                setSelected(undefined);
+              }}
+            >
+              <Sparkles size={15} />
+              {t("用这个 Skill 询问导演助手")}
+            </Button>
+          </footer>
         </Modal>
       )}
       {open && (
@@ -3293,15 +4324,29 @@ function Skills({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void post("/skills", { name, description, content })
+              void post("/skills", { name, title, description, content })
                 .then(async () => {
                   await refresh();
                   setOpen(false);
+                  setName("");
+                  setTitle("");
+                  setDescription("");
+                  setContent("");
                   notify(t("Skill 已保存"));
                 })
                 .catch((e) => notify(e.message, true));
             }}
           >
+            <label className="field">
+              <span>{t("名称")}</span>
+              <input
+                required
+                maxLength={120}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t("如：品牌视频审查")}
+              />
+            </label>
             <label className="field">
               <span>{t("标识 / 英文小写与连字符")}</span>
               <input
@@ -3311,6 +4356,7 @@ function Skills({
                 onChange={(e) => setName(e.target.value)}
                 placeholder="brand-video-review"
               />
+              <small>{t("仅用作内部标识，界面会显示上面的名称。")}</small>
             </label>
             <label className="field">
               <span>{t("用途说明")}</span>
@@ -3414,6 +4460,435 @@ function ImageSettingsFields({
         </Button>
       )}
     </section>
+  );
+}
+
+function EntitlementBanner({
+  license,
+  onOpenSettings,
+}: {
+  license: LicenseState;
+  onOpenSettings: () => void;
+}) {
+  const days = license.daysLeft ?? 0;
+  if (!license.blocked && !(license.status === "trial" && days <= 3))
+    return null;
+  const message = license.blocked
+    ? license.reason === "no-trial"
+      ? t("还未开始试用：开始 14 天试用或激活许可证后即可使用生成功能。")
+      : t("试用或许可已到期：激活后可继续生成，本机作品仍可查看与导出。")
+    : t("试用还剩") + ` ${days} ` + t("天，到期后可激活许可证继续使用。");
+  return (
+    <div
+      className={`entitlement-banner ${license.blocked ? "blocked" : "warn"}`}
+    >
+      {license.blocked ? <AlertCircle size={15} /> : <Clock3 size={15} />}
+      <span>{message}</span>
+      <button onClick={onOpenSettings}>
+        {license.blocked ? t("立即激活") : t("查看许可")}
+      </button>
+    </div>
+  );
+}
+
+function LicenseCard({
+  license,
+  onChanged,
+  notify,
+}: {
+  license: LicenseState;
+  onChanged: (s: LicenseState) => void;
+  notify: (m: string, e?: boolean) => void;
+}) {
+  const [key, setKey] = useState(""),
+    [busy, setBusy] = useState(""),
+    [confirming, setConfirming] = useState(false);
+  const creemLicense = license.creem.license;
+  const paid = creemLicense?.status === "active";
+  const local = !paid && license.status === "active" ? license.license : null;
+  const active = paid || !!local;
+  const trial = license.status === "trial" && !active;
+  const configured = license.creem.configured;
+  async function activate() {
+    const value = key.trim();
+    if (!value) return;
+    setBusy("activate");
+    try {
+      onChanged(await activateLicense(value));
+      setKey("");
+      notify(t("授权已在本机激活"));
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function buy() {
+    setBusy("checkout");
+    try {
+      const { checkoutUrl } = await checkoutLicense();
+      window.open(checkoutUrl, "_blank", "noopener");
+      notify(t("已打开安全结账页，支付后授权码会出现在确认页并发送到邮箱"));
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <section
+      className={`settings-card license-card ${active ? "active" : trial ? "trial" : "expired"}`}
+    >
+      <header>
+        <KeyRound size={20} />
+        <div>
+          <h2>{t("授权与试用")}</h2>
+          <p>
+            {t(
+              "新用户享有 14 天本机试用；购买后用授权码在本机激活。作品与凭据始终保存在你的工作站。",
+            )}
+          </p>
+        </div>
+        <span
+          className={`license-badge ${active ? "active" : trial ? "trial" : "expired"}`}
+        >
+          {active
+            ? t("已激活")
+            : trial
+              ? t("试用中")
+              : license.status === "expired"
+                ? t("已到期")
+                : t("未开始")}
+        </span>
+      </header>
+
+      {paid && creemLicense && (
+        <div className="license-detail">
+          <div>
+            <span>{t("授权码")}</span>
+            <strong>{creemLicense.maskedKey}</strong>
+          </div>
+          <div>
+            <span>{t("本机设备")}</span>
+            <strong>{creemLicense.instanceName}</strong>
+          </div>
+          <div>
+            <span>{t("有效期限")}</span>
+            <strong>
+              {creemLicense.expiresAt
+                ? new Date(creemLicense.expiresAt).toLocaleDateString()
+                : t("永久有效")}
+            </strong>
+          </div>
+          <div>
+            <span>{t("设备名额")}</span>
+            <strong>
+              {creemLicense.activationLimit == null
+                ? t("不限设备")
+                : `${creemLicense.activation ?? 1} / ${creemLicense.activationLimit}`}
+            </strong>
+          </div>
+          <div>
+            <span>{t("最近校验")}</span>
+            <strong>
+              {creemLicense.validatedAt
+                ? new Date(creemLicense.validatedAt).toLocaleString()
+                : "—"}
+              {creemLicense.offline ? ` · ${t("离线宽限中")}` : ""}
+            </strong>
+          </div>
+          <div className="license-actions">
+            <Button
+              type="button"
+              disabled={!!busy}
+              onClick={async () => {
+                setBusy("validate");
+                try {
+                  onChanged(await validateLicense());
+                  notify(t("授权已重新校验"));
+                } catch (e) {
+                  notify((e as Error).message, true);
+                } finally {
+                  setBusy("");
+                }
+              }}
+            >
+              {busy === "validate" ? (
+                <Loader2 className="spin" size={15} />
+              ) : (
+                <RefreshCw size={15} />
+              )}
+              {t("立即校验")}
+            </Button>
+            {confirming ? (
+              <>
+                <span className="confirm-text">
+                  {t(
+                    "解绑会释放本机设备名额，解绑后生成功能将停用，确认解绑？",
+                  )}
+                </span>
+                <Button
+                  onClick={async () => {
+                    setConfirming(false);
+                    setBusy("deactivate");
+                    try {
+                      onChanged(await deactivateLicense());
+                      notify(t("设备已解绑"));
+                    } catch (e) {
+                      notify((e as Error).message, true);
+                    } finally {
+                      setBusy("");
+                    }
+                  }}
+                >
+                  {t("确认解绑")}
+                </Button>
+                <button
+                  type="button"
+                  className="text-btn"
+                  onClick={() => setConfirming(false)}
+                >
+                  {t("取消")}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="text-btn danger"
+                onClick={() => setConfirming(true)}
+              >
+                {t("解绑本机设备")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {local && (
+        <div className="license-detail">
+          <div>
+            <span>{t("授权邮箱")}</span>
+            <strong>{local.email}</strong>
+          </div>
+          <div>
+            <span>{t("授权套餐")}</span>
+            <strong>{local.plan}</strong>
+          </div>
+          <div>
+            <span>{t("有效期限")}</span>
+            <strong>{local.until ? local.until : t("永久有效")}</strong>
+          </div>
+          <div>
+            <span>{t("设备绑定")}</span>
+            <strong>
+              {local.machineBound ? t("已绑定本机") : t("不限设备")}
+            </strong>
+          </div>
+          <div>
+            <span>{t("激活时间")}</span>
+            <strong>{new Date(local.activatedAt).toLocaleString()}</strong>
+          </div>
+          <div className="license-actions">
+            {confirming ? (
+              <>
+                <span className="confirm-text">
+                  {t("解绑后生成功能将停用，确认解除本机授权？")}
+                </span>
+                <Button
+                  onClick={async () => {
+                    setConfirming(false);
+                    setBusy("deactivate");
+                    try {
+                      onChanged(await deactivateLicense());
+                      notify(t("设备已解绑"));
+                    } catch (e) {
+                      notify((e as Error).message, true);
+                    } finally {
+                      setBusy("");
+                    }
+                  }}
+                >
+                  {t("确认解绑")}
+                </Button>
+                <button
+                  type="button"
+                  className="text-btn"
+                  onClick={() => setConfirming(false)}
+                >
+                  {t("取消")}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="text-btn danger"
+                onClick={() => setConfirming(true)}
+              >
+                {t("解除本机授权")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {trial && license.trial && (
+        <div className="license-detail">
+          <div>
+            <span>{t("试用截止")}</span>
+            <strong>
+              {new Date(license.trial.endsAt).toLocaleDateString()} ·{" "}
+              {t("剩余")} {license.daysLeft} {t("天")}
+            </strong>
+          </div>
+          <div className="trial-meter" aria-hidden="true">
+            <i
+              style={{
+                width: `${Math.min(100, Math.round(((license.daysLeft ?? 0) / 14) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {!active && license.status === "expired" && (
+        <p className="license-expired-note">
+          {t("服务期已结束，购买并激活授权后继续使用生成功能。")}
+        </p>
+      )}
+
+      {!active && (
+        <div className="license-activate">
+          <label className="field">
+            <span>{t("授权码")}</span>
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder={t("购买后粘贴授权码")}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void activate();
+                }
+              }}
+            />
+          </label>
+          <Button
+            onClick={() => void activate()}
+            disabled={!!busy || !key.trim()}
+          >
+            {busy === "activate" ? (
+              <Loader2 className="spin" size={15} />
+            ) : (
+              <KeyRound size={15} />
+            )}
+            {t("激活授权")}
+          </Button>
+          {configured && (
+            <Button
+              variant="primary"
+              onClick={() => void buy()}
+              disabled={!!busy}
+            >
+              {busy === "checkout" ? (
+                <Loader2 className="spin" size={15} />
+              ) : (
+                <ExternalLink size={15} />
+              )}
+              {t("购买镜序桌面版")}
+            </Button>
+          )}
+          {license.status === "none" && (
+            <button
+              type="button"
+              className="text-btn"
+              onClick={async () => {
+                try {
+                  onChanged(await startTrial());
+                  notify(t("14 天试用已开始"));
+                } catch (e) {
+                  notify((e as Error).message, true);
+                }
+              }}
+            >
+              {t("开始 14 天免费试用")}
+            </button>
+          )}
+        </div>
+      )}
+      {!active && !configured && (
+        <p className="license-note-info">
+          {t("在线结账即将开通；拿到授权码后可直接在此激活。")}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function TrialWelcome({
+  busy,
+  onStart,
+  onLater,
+}: {
+  busy: boolean;
+  onStart: () => void;
+  onLater: () => void;
+}) {
+  return (
+    <div className="modal-backdrop welcome-backdrop">
+      <div className="modal welcome-modal" role="dialog" aria-modal="true">
+        <div className="welcome-mark">
+          <Clapperboard size={26} />
+        </div>
+        <div className="eyebrow">JINGXU STUDIO</div>
+        <h1>{t("把灵感，做成可交付的成片")}</h1>
+        <p>
+          {t(
+            "本地优先的短剧制作工作台：剧本拆镜、角色与场景参考、图片 / 配音 / 字幕、视频生成与成片导出，全部在你的工作站完成。",
+          )}
+        </p>
+        <ul className="welcome-points">
+          <li>
+            <ShieldCheck size={16} />
+            <span>
+              <strong>{t("作品留在本机")}</strong>
+              {t("项目、素材与凭据默认不出本机")}
+            </span>
+          </li>
+          <li>
+            <Sparkles size={16} />
+            <span>
+              <strong>{t("生成服务自由选择")}</strong>
+              {t("自带 API Key，也可先用演示素材走通流程")}
+            </span>
+          </li>
+          <li>
+            <Film size={16} />
+            <span>
+              <strong>{t("14 天完整功能试用")}</strong>
+              {t("到期后可用许可证续期，作品始终可查看与导出")}
+            </span>
+          </li>
+        </ul>
+        <div className="welcome-actions">
+          <Button onClick={onStart} disabled={busy}>
+            {busy ? (
+              <Loader2 className="spin" size={15} />
+            ) : (
+              <Sparkles size={15} />
+            )}
+            {t("开始 14 天免费试用")}
+          </Button>
+          <button type="button" className="text-btn" onClick={onLater}>
+            {t("我已有许可证")}
+          </button>
+        </div>
+        <small className="welcome-note">
+          {t("开始试用即表示同意服务条款与隐私政策；试用期不会自动扣费。")}
+        </small>
+      </div>
+    </div>
   );
 }
 

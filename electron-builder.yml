@@ -11,6 +11,7 @@ files:
 asarUnpack:
   - dist/runtime/fonts/**
   - node_modules/ffmpeg-static/**
+  - node_modules/ffprobe-static/**
   - node_modules/@img/**
   - node_modules/sharp/**
   - node_modules/sql.js/dist/*.wasm
@@ -22,12 +23,28 @@ mac:
     - zip
   hardenedRuntime: true
   gatekeeperAssess: false
+  # ffprobe-static bundles binaries for every platform in one package; keep
+  # only the macOS binaries in the macOS app.
+  files:
+    - dist/**
+    - package.json
+    - "!dist/**/*.map"
+    - "!node_modules/ffprobe-static/bin/linux/**"
+    - "!node_modules/ffprobe-static/bin/win32/**"
   extendInfo:
     NSDocumentsFolderUsageDescription: 用于导入剧本、素材和保存成片。
 win:
   target:
     - target: nsis
       arch: [x64]
+  # Keep only the Windows x64 ffprobe binary in the Windows package.
+  files:
+    - dist/**
+    - package.json
+    - "!dist/**/*.map"
+    - "!node_modules/ffprobe-static/bin/darwin/**"
+    - "!node_modules/ffprobe-static/bin/linux/**"
+    - "!node_modules/ffprobe-static/bin/win32/ia32/**"
 nsis:
   oneClick: false
   perMachine: false

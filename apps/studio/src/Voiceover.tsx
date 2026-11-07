@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { Volume2, Loader2 } from "lucide-react";
-import type { Settings, Job } from "../../../packages/core/src/model";
+import type { Settings, Job, Pricing } from "../../../packages/core/src/model";
 import { post } from "./api";
 import { t } from "./i18n";
+import { estimateSpeech } from "../../../packages/core/src/usage";
 
 export type PublicSpeech = Omit<Settings["speech"], "apiKey"> & {
   apiKey?: string;
@@ -103,6 +104,7 @@ export function VoiceoverComposer({
   saveDraft,
   onQueued,
   openSettings,
+  pricing,
 }: {
   projectId: string;
   shotId: string;
@@ -113,6 +115,7 @@ export function VoiceoverComposer({
   saveDraft: () => Promise<boolean>;
   onQueued: () => Promise<void>;
   openSettings: () => void;
+  pricing?: Pricing;
 }) {
   const [confirming, setConfirming] = useState(false),
     [pending, setPending] = useState(false),
@@ -124,6 +127,7 @@ export function VoiceoverComposer({
     config.voice &&
     config.hasApiKey
   );
+  const speechEstimate = estimateSpeech(dialogue.trim().length, pricing);
   async function submit() {
     if (pending || disabled || (running && !accepted)) return;
     const text = dialogue.trim();
@@ -178,6 +182,25 @@ export function VoiceoverComposer({
             {config.model} · {config.voice} · {config.speed}×
           </p>
           <blockquote>{dialogue.trim()}</blockquote>
+          <div className="review-cost">
+            <span>{t("预计成本")}</span>
+            {speechEstimate.cost !== undefined ? (
+              <>
+                <strong>
+                  ≈ {speechEstimate.currency}
+                  {Number(speechEstimate.cost.toFixed(4))}
+                </strong>
+                <small>
+                  · {speechEstimate.chars} {t("字")}
+                  {t("，以服务商账单为准。")}
+                </small>
+              </>
+            ) : (
+              <small>
+                · {speechEstimate.chars} {t("字")}
+              </small>
+            )}
+          </div>
           <p className="caption">
             {t(
               "台词将发送给你配置的语音服务并可能计费。生成后先试听，再选为镜头配音；现有音轨会保留。",

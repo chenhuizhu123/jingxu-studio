@@ -193,6 +193,69 @@ describe("官网静态与内存交互验证（不打开浏览器）", () => {
     expect(button.getAttribute("aria-pressed")).toBe("false");
     dom.window.close();
   });
+  const ORIGIN = "https://jingxu-studio.toughjoy.chatgpt.site";
+  it.each(["zh", "en"] as const)(
+    "%s 首页具备 canonical / hreflang 与社交分享卡 meta",
+    (language) => {
+      const file = language === "en" ? "en/index.html" : "index.html";
+      const dom = new JSDOM(readFileSync(resolve(root, file), "utf8"));
+      const doc = dom.window.document;
+      const canonicalPath = language === "en" ? "/en/" : "/";
+      const meta = (selector: string) =>
+        doc.querySelector(selector)?.getAttribute("content");
+      const alt = (hreflang: string) =>
+        doc
+          .querySelector(`link[rel="alternate"][hreflang="${hreflang}"]`)
+          ?.getAttribute("href");
+      expect(
+        doc
+          .querySelector("link[rel='canonical']")
+          ?.getAttribute("href"),
+      ).toBe(ORIGIN + canonicalPath);
+      expect(alt(language === "en" ? "en" : "zh-CN")).toBe(
+        ORIGIN + canonicalPath,
+      );
+      expect(alt(language === "en" ? "zh-CN" : "en")).toBe(
+        language === "en" ? ORIGIN + "/" : ORIGIN + "/en/",
+      );
+      expect(alt("x-default")).toBe(ORIGIN + "/");
+      expect(meta('meta[property="og:type"]')).toBe("website");
+      expect(meta('meta[property="og:locale"]')).toBe(
+        language === "en" ? "en_US" : "zh_CN",
+      );
+      expect(meta('meta[property="og:url"]')).toBe(ORIGIN + canonicalPath);
+      expect(meta('meta[name="twitter:card"]')).toBe("summary_large_image");
+      const image = meta('meta[property="og:image"]')!;
+      const twitterImage = meta('meta[name="twitter:image"]');
+      expect(image).toBe(twitterImage);
+      expect(image.startsWith(ORIGIN + "/assets/og-card-")).toBe(true);
+      const localImage = resolve(root, "." + new URL(image).pathname);
+      expect(existsSync(localImage)).toBe(true);
+      expect(
+        readFileSync(localImage).subarray(0, 8).toString("hex"),
+      ).toBe("89504e470d0a1a0a");
+      dom.window.close();
+    },
+  );
+  it("隐私与使用说明中英版本日期一致、关键澄清对等", () => {
+    const zhPrivacy = readFileSync(resolve(root, "privacy.html"), "utf8");
+    const enPrivacy = readFileSync(resolve(root, "en/privacy.html"), "utf8");
+    const zhTerms = readFileSync(resolve(root, "terms.html"), "utf8");
+    const enTerms = readFileSync(resolve(root, "en/terms.html"), "utf8");
+    const sameDate =
+      zhPrivacy.includes("2026 年 11 月 4 日") &&
+      zhTerms.includes("2026 年 11 月 4 日") &&
+      enPrivacy.includes("November 4, 2026") &&
+      enTerms.includes("November 4, 2026");
+    expect(sameDate).toBe(true);
+    // Clarifications that previously existed only in English must stay mirrored.
+    expect(zhTerms).toContain("未签名的安装包不是正式签名公开发布版本");
+    expect(enTerms).toContain("An unsigned build is not a signed public release");
+    expect(zhTerms).toContain("按镜头计时的字幕不是自动语音对齐");
+    expect(enTerms).toContain("Shot-timed subtitles are not automatic speech alignment");
+    expect(zhPrivacy).toContain("项目导出包不包含凭据");
+    expect(enPrivacy).toContain("Project packages exclude credentials");
+  });
 });
 
 it.each(["zh", "en"] as const)(

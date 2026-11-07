@@ -67,7 +67,12 @@ jobs:
           java-version: 21
       - run: flutter pub get
       - run: flutter analyze --no-pub
-      - run: flutter test --no-pub --coverage
+      - if: runner.os == 'macOS'
+        run: flutter test --no-pub --coverage
+      # The committed snapshots use macOS font rasterization. Ubuntu still
+      # executes every functional assertion in the widget test files.
+      - if: runner.os == 'Linux'
+        run: flutter test --no-pub --coverage --dart-define=JINGXU_COMPARE_GOLDENS=false
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with:

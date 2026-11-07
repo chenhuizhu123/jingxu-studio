@@ -20,7 +20,11 @@ test("创建作品、编辑镜头、生成候选、回选和导出字幕", async
     .fill("角色：阿青\n阿青：我们终于到了。");
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   await expect(page.getByRole("heading", { name, exact: false })).toBeVisible();
-  await page.getByRole("button", { name: /编辑镜头 1/ }).click();
+  await page.getByRole("button", { name: "交付中心", exact: true }).click();
+  await expect(page.getByRole("button", { name: "渲染成片" })).toBeDisabled();
+  await page
+    .getByRole("button", { name: /镜头 1.*选择一张图片或一段视频/ })
+    .click();
   await page.getByLabel("镜头标题").fill("新的开头");
   await page.getByLabel("时长 / 秒").fill("2");
   await page.getByRole("button", { name: "保存修改", exact: true }).click();
@@ -44,6 +48,7 @@ test("创建作品、编辑镜头、生成候选、回选和导出字幕", async
   if (testInfo.project.name.includes("mobile"))
     await page.getByRole("button", { name: "返回分镜" }).click();
   await page.getByRole("button", { name: "交付中心", exact: true }).click();
+  await expect(page.getByRole("button", { name: "渲染成片" })).toBeEnabled();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "SRT", exact: true }).click();
   const file = await downloadPromise;

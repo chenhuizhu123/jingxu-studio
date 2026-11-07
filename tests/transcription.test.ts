@@ -466,6 +466,7 @@ describe("timestamped speech recognition and caption delivery", () => {
         seed: false,
         startQueue: false,
       });
+    engine.license.startTrial();
     try {
       engine.store.put("project", p.id, p);
       const req = (path: string, method: string, body: unknown) =>

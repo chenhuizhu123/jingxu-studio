@@ -19,6 +19,7 @@ const portraitDescription = "Short dark hair, moss coat, silver locket";
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "jingxu-cast-sync-"));
   app = await startServer({ root, port: 0, seed: false, startQueue: false });
+  app.license.startTrial();
   const source = {
     name: "Letters in the rain",
     style: "Cinematic",

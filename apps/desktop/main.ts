@@ -86,6 +86,12 @@ if (single)
         studioRoot: join(base, "dist/studio"),
         skillRoot: join(base, "dist/skills"),
         wasmPath: join(base, "dist/runtime/sql-wasm.wasm"),
+        billing: process.env.JINGXU_BILLING_API_URL
+          ? {
+              url: process.env.JINGXU_BILLING_API_URL,
+              enforce: process.env.JINGXU_BILLING_ENFORCE === "1",
+            }
+          : undefined,
       });
       if (safeStorage.isEncryptionAvailable()) {
         const plain = join(root, ".vault-key");
@@ -150,6 +156,9 @@ app.on("before-quit", (event) => {
   if (server && !closing) {
     event.preventDefault();
     closing = true;
-    void server.close().then(() => app.quit());
+    void server
+      .close()
+      .catch(console.error)
+      .finally(() => app.quit());
   }
 });

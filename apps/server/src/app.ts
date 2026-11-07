@@ -6,6 +6,7 @@ import express, {
 import multer from "multer";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { hostname as osHostname, platform as osPlatform } from "node:os";
 import { mkdir, writeFile, stat, unlink, readdir } from "node:fs/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, extname } from "node:path";
@@ -41,6 +42,8 @@ import {
 } from "../../../packages/core/src/media";
 import { endpoint, redactError } from "../../../packages/core/src/providers";
 import { JobQueue } from "../../../packages/core/src/queue";
+import { summarizeUsage } from "../../../packages/core/src/usage";
+import { LicenseGate } from "../../../packages/core/src/license";
 import { McpHub } from "../../../packages/core/src/mcp";
 import { DirectorAgent, readSkills } from "../../../packages/core/src/agent";
 import { reviewShot } from "../../../packages/core/src/vision";
@@ -69,6 +72,11 @@ import {
   applySceneSync,
   previewSceneSync,
 } from "../../../packages/core/src/series-scene";
+import {
+  Licensing,
+  LicenseError,
+  type BillingConfig,
+} from "../../../packages/core/src/licensing";
 
 export type ServerOptions = {
   root: string;
@@ -82,6 +90,7 @@ export type ServerOptions = {
   seed?: boolean;
   startQueue?: boolean;
   allowedOrigins?: string[];
+  billing?: BillingConfig;
 };
 export async function createApp(options: ServerOptions) {
   const store = await Store.open(options.root, options.wasmPath);
@@ -90,9 +99,14 @@ export async function createApp(options: ServerOptions) {
   if (!existsSync(tokenFile))
     writeFileSync(tokenFile, randomBytes(32).toString("hex"), { mode: 0o600 });
   const token = options.token ?? readFileSync(tokenFile, "utf8");
-  const queue = new JobQueue(store),
-    mcp = new McpHub(store),
-    skillRoot = options.skillRoot ?? resolve("packages/core/skills"),
+  const license = new LicenseGate(options.root);
+  const queue = new JobQueue(store, license),
+    mcp = new McpHub(store);
+  const licensing = new Licensing(
+    options.billing,
+    join(options.root, "license.json"),
+  );
+  const skillRoot = options.skillRoot ?? resolve("packages/core/skills"),
     agent = new DirectorAgent(store, skillRoot, mcp);
   const firstFilm = createFirstFilmSamples(
     store,
@@ -191,7 +205,7 @@ export async function createApp(options: ServerOptions) {
     return `${path}?expires=${expires}&signature=${sign(path, expires)}`;
   };
   function exportSubtitle(e: Project["exports"][number]) {
-    if (e.kind !== "video") return undefined;
+    if (e.kind !== "video" && e.kind !== "animatic") return undefined;
     const file =
       e.subtitlesFile ??
       (/\.mp4$/i.test(e.file) ? e.file.replace(/\.mp4$/i, ".srt") : undefined);
@@ -866,6 +880,12 @@ export async function createApp(options: ServerOptions) {
     ),
   );
   app.post(
+    "/api/projects/:id/animatic",
+    route((req, res) =>
+      res.status(202).json(queue.enqueue(param(req, "id"), "animatic")),
+    ),
+  );
+  app.post(
     "/api/projects/:id/archive",
     route(async (req, res) => {
       const key = param(req, "id");
@@ -876,6 +896,15 @@ export async function createApp(options: ServerOptions) {
   app.get(
     "/api/jobs",
     route((_req, res) => res.json(store.jobs())),
+  );
+  app.get(
+    "/api/projects/:id/usage",
+    route((req, res) => {
+      const key = param(req, "id");
+      // 404 for unknown projects, then measure succeeded billable jobs.
+      store.project(key);
+      res.json(summarizeUsage(store.jobs().filter((j) => j.projectId === key)));
+    }),
   );
   app.post(
     "/api/jobs/:id/cancel",
@@ -932,8 +961,80 @@ export async function createApp(options: ServerOptions) {
           ...parsed.agent,
           apiKey: parsed.agent.apiKey ?? old.agent.apiKey,
         },
+        pricing: parsed.pricing ?? old.pricing,
       });
+      queue.refreshConcurrency();
       res.json(store.publicSettings());
+    }),
+  );
+  // Paid entitlements come from Creem (hosted checkout + device license);
+  // the local LicenseGate handles the 14-day trial and offline JX1 keys.
+  // Creem-active wins and bypasses the local gate.
+  const licenseView = async () => {
+    const gate = license.state();
+    const creem = await licensing.view();
+    license.setExternalEntitledUntil(creem.license?.validUntil ?? null);
+    return creem.license?.status === "active"
+      ? { ...gate, blocked: false, status: "active" as const, creem }
+      : { ...gate, creem };
+  };
+  const instanceName = `镜序 Studio · ${osHostname()} (${osPlatform()})`.slice(
+    0,
+    200,
+  );
+  app.get(
+    "/api/license",
+    route(async (_req, res) => res.json(await licenseView())),
+  );
+  app.post(
+    "/api/license/trial",
+    route(async (_req, res) => {
+      license.startTrial();
+      res.json(await licenseView());
+    }),
+  );
+  app.post(
+    "/api/license/checkout",
+    route(async (_req, res) =>
+      res.json({ checkoutUrl: await licensing.checkout() }),
+    ),
+  );
+  app.post(
+    "/api/license/activate",
+    route(async (req, res) => {
+      const { key } = z
+        .object({ key: z.string().trim().min(8).max(2000) })
+        .parse(req.body);
+      // Offline publisher-signed keys ("JX1-…") verify locally without the
+      // billing edge; everything else is exchanged through Creem.
+      if (/^JX1-/i.test(key.trim())) license.activate(key);
+      else await licensing.activate(key, instanceName);
+      res.json(await licenseView());
+    }),
+  );
+  app.post(
+    "/api/license/validate",
+    route(async (_req, res) => {
+      try {
+        await licensing.validateWithGrace();
+      } catch (error) {
+        const next = await licenseView();
+        if (error instanceof LicenseError && error.rejected) {
+          res.json(next);
+          return;
+        }
+        throw error;
+      }
+      res.json(await licenseView());
+    }),
+  );
+  app.post(
+    "/api/license/deactivate",
+    route(async (_req, res) => {
+      const view = await licensing.view();
+      if (view.license) await licensing.deactivate();
+      license.deactivate();
+      res.json(await licenseView());
     }),
   );
   app.get(
@@ -946,6 +1047,7 @@ export async function createApp(options: ServerOptions) {
       const data = z
         .object({
           name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+          title: z.string().trim().min(1).max(120).optional(),
           description: z.string().min(1).max(1000),
           content: z.string().min(1).max(40000),
         })
@@ -954,6 +1056,7 @@ export async function createApp(options: ServerOptions) {
         store.path(`skills/${data.name}.md`),
         matter.stringify(data.content, {
           name: data.name,
+          ...(data.title ? { title: data.title } : {}),
           description: data.description,
         }),
       );
@@ -1075,7 +1178,9 @@ export async function createApp(options: ServerOptions) {
       const p = store.project(param(req, "projectId")),
         a = p.assets.find((a) => a.id === param(req, "assetId"));
       if (!a) throw new AppError(404, "素材不存在");
-      res.type(a.mime).sendFile(store.path(a.file));
+      // Paths come from authenticated DB records and store.path() rejects
+      // traversal; allow dotdirs so roots like .data/.data-e2e work.
+      res.type(a.mime).sendFile(store.path(a.file), { dotfiles: "allow" });
     }),
   );
   app.get(
@@ -1085,7 +1190,7 @@ export async function createApp(options: ServerOptions) {
       const p = store.project(param(req, "projectId")),
         e = p.exports.find((e) => e.id === param(req, "exportId"));
       if (!e) throw new AppError(404, "导出不存在");
-      res.download(store.path(e.file), e.name);
+      res.download(store.path(e.file), e.name, { dotfiles: "allow" });
     }),
   );
   app.get(
@@ -1096,7 +1201,9 @@ export async function createApp(options: ServerOptions) {
         e = p.exports.find((e) => e.id === param(req, "exportId"));
       const file = e && exportSubtitle(e);
       if (!e || !file) throw new AppError(404, "该导出没有保存字幕文件");
-      res.download(store.path(file), e.name.replace(/\.mp4$/i, "") + ".srt");
+      res.download(store.path(file), e.name.replace(/\.mp4$/i, "") + ".srt", {
+        dotfiles: "allow",
+      });
     }),
   );
   if (options.studioRoot && existsSync(options.studioRoot)) {
@@ -1111,11 +1218,13 @@ export async function createApp(options: ServerOptions) {
       const status =
         error instanceof AppError
           ? error.status
-          : error instanceof z.ZodError
+          : error instanceof LicenseError
             ? 400
-            : error instanceof multer.MulterError
-              ? 413
-              : 500;
+            : error instanceof z.ZodError
+              ? 400
+              : error instanceof multer.MulterError
+                ? 413
+                : 500;
       const message =
         error instanceof z.ZodError
           ? error.issues
@@ -1149,13 +1258,30 @@ export async function createApp(options: ServerOptions) {
     });
     store.put("project", p.id, p);
   }
+  let licenseRefresh: ReturnType<typeof setInterval> | undefined;
+  if (licensing.configured) {
+    await licenseView();
+    const refreshLicense = async () => {
+      if (!(await licensing.view()).license) return;
+      await licensing.validateWithGrace().catch(() => {});
+      await licenseView();
+    };
+    void refreshLicense().catch(() => {});
+    licenseRefresh = setInterval(
+      () => void refreshLicense().catch(() => {}),
+      12 * 60 * 60 * 1000,
+    );
+    licenseRefresh.unref();
+  }
   if (options.startQueue !== false) queue.start();
   return {
     app,
     store,
     queue,
+    license,
     token,
     close: async () => {
+      clearInterval(licenseRefresh);
       await queue.close();
       store.close();
     },
@@ -1171,13 +1297,18 @@ export async function startServer(options: ServerOptions) {
     );
   });
   const address = server.address();
+  let closing: Promise<void> | undefined;
   return {
     ...instance,
     server,
     port: typeof address === "object" && address ? address.port : 4318,
-    close: async () => {
-      await instance.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+    close: () => {
+      closing ??= new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        // The renderer may still be polling or downloading when Electron quits.
+        server.closeAllConnections();
+      }).then(() => instance.close());
+      return closing;
     },
   };
 }

@@ -32,6 +32,8 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - run: npm run test:package
+        env:
+          JINGXU_REQUIRE_REDISTRIBUTABLE_MEDIA: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '0' }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-mac
@@ -58,6 +60,8 @@ jobs:
       - run: npm ci
       - run: npm run package:win
       - run: npm run test:package
+        env:
+          JINGXU_REQUIRE_REDISTRIBUTABLE_MEDIA: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '0' }}
       - run: npm run test:win:structure
       - uses: actions/upload-artifact@v4
         if: always()
@@ -88,8 +92,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
       - run: npm run mobile:verify:android
       - uses: actions/upload-artifact@v4
         with:
@@ -112,6 +114,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           name: 镜序 Studio ${{ github.ref_name }}
+          prerelease: true
           generate_release_notes: true
           files: |
             artifacts/**/*.dmg

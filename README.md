@@ -74,6 +74,8 @@ flutter build ios --simulator --debug
 
 ## 记录 / Evidence
 
+- [产品用户手册](docs/USER-MANUAL.md)
+- [桌面付费试点与 Creem 沙盒](docs/DESKTOP-PILOT.md)
 - [产品交付标准](docs/PRODUCT.md)
 - [截图与阶段进度](docs/PROGRESS.md)
 - [竞品对比、缺口和验收项](docs/COMPETITIVE-REVIEW.md)

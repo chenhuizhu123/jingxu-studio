@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { writeFile, stat, rename, unlink } from "node:fs/promises";
 import { join, basename, resolve } from "node:path";
 import ffmpegStatic from "ffmpeg-static";
+import { path as ffprobeStaticPath } from "ffprobe-static";
 import sharp from "sharp";
 import {
   id,
@@ -48,10 +49,18 @@ export async function createDemoAsset(
     createdAt: now(),
   };
 }
+function unpackedBinary(path: string) {
+  return path.replace(/(^|[/\\])app\.asar([/\\])/, "$1app.asar.unpacked$2");
+}
 export function ffmpegPath() {
   const path = process.env.JINGXU_FFMPEG || ffmpegStatic;
   if (!path) throw new AppError(503, "未找到本机视频渲染器");
-  return path.replace(/app\.asar([/\\])/g, "app.asar.unpacked$1");
+  return unpackedBinary(path);
+}
+export function ffprobePath() {
+  const path = process.env.JINGXU_FFPROBE || ffprobeStaticPath;
+  if (!path) throw new AppError(503, "未找到本机媒体探测器");
+  return unpackedBinary(path);
 }
 export function runFfmpeg(args: string[], signal?: AbortSignal, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
@@ -89,32 +98,52 @@ export function probeMedia(file: string, signal?: AbortSignal) {
     hasVideo: boolean;
     duration: number;
   }>((resolve, reject) => {
-    let output = "";
-    const process = spawn(ffmpegPath(), ["-hide_banner", "-i", file], {
-      windowsHide: true,
-      signal,
-    });
-    const timeout = setTimeout(() => process.kill(), 15000);
-    process.stderr.on(
-      "data",
-      (d) => (output = (output + d.toString()).slice(-100000)),
+    let stdout = "";
+    const process = spawn(
+      ffprobePath(),
+      [
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_entries",
+        "format=duration:stream=codec_type",
+        file,
+      ],
+      { windowsHide: true, signal },
     );
+    const timeout = setTimeout(() => process.kill(), 15000);
+    process.stdout.on("data", (d) => (stdout += d.toString()));
+    // ffprobe writes parse errors to stderr with -v error; drain so the
+    // child can never block on a full pipe.
+    process.stderr.on("data", () => {});
     process.once("error", (e) => {
       clearTimeout(timeout);
       reject(e);
     });
-    process.once("close", () => {
+    process.once("close", (code) => {
       clearTimeout(timeout);
-      const match = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
-      if (!match)
-        return reject(
-          new AppError(400, "无法识别媒体时长，请检查文件是否损坏"),
-        );
+      const invalid = new AppError(400, "无法识别媒体时长，请检查文件是否损坏");
+      if (code !== 0) return reject(invalid);
+      let data: any;
+      try {
+        data = JSON.parse(stdout || "{}");
+      } catch {
+        return reject(invalid);
+      }
+      const duration = Number(data?.format?.duration);
+      if (!Number.isFinite(duration) || duration <= 0) return reject(invalid);
+      const streams: unknown[] = Array.isArray(data.streams)
+        ? data.streams
+        : [];
       resolve({
-        hasAudio: /Stream #.*Audio:/.test(output),
-        hasVideo: /Stream #.*Video:/.test(output),
-        duration:
-          Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]),
+        hasAudio: streams.some(
+          (s) => (s as { codec_type?: string }).codec_type === "audio",
+        ),
+        hasVideo: streams.some(
+          (s) => (s as { codec_type?: string }).codec_type === "video",
+        ),
+        duration,
       });
     });
   });
@@ -266,6 +295,164 @@ export async function renderVideo(
       name: `${p.name}-r${p.revision}.mp4`,
       file,
       kind: "video",
+      createdAt: now(),
+      size: info.size,
+      revision: p.revision,
+    };
+  } finally {
+    await Promise.all(tempFiles.map((f) => unlink(f).catch(() => {})));
+  }
+}
+// Choose a still image for the free animatic rough cut: the selected image
+// candidate first, then the first bound reference image. Video candidates are
+// intentionally skipped (the animatic must not depend on paid generations).
+// Returns undefined when the shot has no usable still, so a local placeholder
+// card is rendered instead.
+export function animaticStillAssetId(
+  p: Project,
+  s: Project["shots"][number],
+): string | undefined {
+  const selected = p.assets.find(
+    (a) => a.id === selectedVersion(s)?.assetId && a.kind === "image",
+  );
+  if (selected) return selected.id;
+  for (const refId of s.referenceIds ?? []) {
+    const ref = p.assets.find((a) => a.id === refId && a.kind === "image");
+    if (ref) return ref.id;
+  }
+  return undefined;
+}
+export function placeholderSvg(order: number, title: string) {
+  const safeTitle = title.replace(/[<>&]/g, "").slice(0, 18) || "未命名镜头";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280"><rect width="720" height="1280" fill="#151b19"/><rect x="40" y="40" width="640" height="1200" fill="none" stroke="#2c3a32" stroke-width="2" stroke-dasharray="14 12" rx="18"/><text x="360" y="560" text-anchor="middle" fill="#c4dfaa" font-family="sans-serif" font-size="120" letter-spacing="8">SHOT ${String(order).padStart(2, "0")}</text><text x="360" y="660" text-anchor="middle" fill="#819087" font-family="sans-serif" font-size="40">${safeTitle}</text><text x="360" y="720" text-anchor="middle" fill="#4a574e" font-family="sans-serif" font-size="26" letter-spacing="4">ANIMATIC · 待生成画面</text></svg>`;
+}
+// Free, fully local rough cut: every shot becomes a still (selected image or
+// reference, otherwise a generated placeholder card) held for its duration,
+// with dialogue burned as subtitles and a silent stereo track. It never calls
+// a provider, so it costs zero model credits and is safe before any video is
+// generated. Used to judge whole-scene pacing and continuity up front.
+export async function renderAnimatic(
+  store: Store,
+  p: Project,
+  onProgress: (n: number) => void,
+  signal?: AbortSignal,
+): Promise<Export> {
+  if (!p.shots.length) throw new AppError(400, "请先添加分镜");
+  const [width, height] =
+    p.format === "16:9"
+      ? [1280, 720]
+      : p.format === "1:1"
+        ? [720, 720]
+        : [720, 1280];
+  const srt = makeSrt(p.shots);
+  const exportId = id(),
+    tempFiles: string[] = [],
+    clips: string[] = [];
+  try {
+    for (const [i, s] of [...p.shots]
+      .sort((a, b) => a.order - b.order)
+      .entries()) {
+      signal?.throwIfAborted();
+      const output = store.path(`exports/${exportId}-${i}.mp4`);
+      tempFiles.push(output);
+      clips.push(output);
+      const stillId = animaticStillAssetId(p, s);
+      const still = p.assets.find((a) => a.id === stillId);
+      let stillFile: string;
+      if (still) {
+        stillFile = store.path(still.file);
+      } else {
+        const placeholder = store.path(`exports/${exportId}-${i}.png`);
+        tempFiles.push(placeholder);
+        await sharp(Buffer.from(placeholderSvg(s.order, s.title)))
+          .png()
+          .toFile(placeholder);
+        stillFile = placeholder;
+      }
+      await runFfmpeg(
+        [
+          "-loop",
+          "1",
+          "-i",
+          stillFile,
+          "-f",
+          "lavfi",
+          "-i",
+          "anullsrc=channel_layout=stereo:sample_rate=48000",
+          "-t",
+          String(s.duration),
+          "-map",
+          "0:v:0",
+          "-map",
+          "1:a:0",
+          "-vf",
+          `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=${s.duration}`,
+          "-af",
+          "apad,aresample=48000",
+          "-ac",
+          "2",
+          "-c:v",
+          "libx264",
+          "-preset",
+          "ultrafast",
+          "-crf",
+          "28",
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          "aac",
+          "-shortest",
+          output,
+        ],
+        signal,
+      );
+      onProgress(Math.round(((i + 1) / p.shots.length) * 85));
+    }
+    const list = store.path(`exports/${exportId}.txt`);
+    tempFiles.push(list);
+    await writeFile(list, clips.map((c) => `file '${basename(c)}'`).join("\n"));
+    const file = `exports/${exportId}.mp4`,
+      partial = store.path(`exports/${exportId}-partial.mp4`);
+    tempFiles.push(partial);
+    const subtitleFile = store.path(`exports/${exportId}.srt`);
+    await writeFile(subtitleFile, srt, "utf8");
+    const fontDir = process.env.JINGXU_FONTS_DIR ?? resolve("resources/fonts");
+    const burn = !!srt && p.burnSubtitles !== false;
+    const effects: string[] = [];
+    if (burn)
+      effects.push(
+        "-vf",
+        `subtitles=filename='${filterPath(subtitleFile)}':fontsdir='${filterPath(fontDir)}':force_style='FontName=Noto Sans SC,FontSize=18,Outline=1.5,MarginV=28'`,
+      );
+    await runFfmpeg(
+      [
+        "-f",
+        "concat",
+        "-safe",
+        "1",
+        "-i",
+        list,
+        ...effects,
+        "-c:v",
+        burn ? "libx264" : "copy",
+        ...(burn ? ["-preset", "fast", "-crf", "23"] : []),
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        partial,
+      ],
+      signal,
+    );
+    signal?.throwIfAborted();
+    await rename(partial, store.path(file));
+    const info = await stat(store.path(file));
+    return {
+      id: exportId,
+      subtitlesFile: `exports/${exportId}.srt`,
+      name: `${p.name}-animatic-r${p.revision}.mp4`,
+      file,
+      kind: "animatic",
       createdAt: now(),
       size: info.size,
       revision: p.revision,
